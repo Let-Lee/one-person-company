@@ -18,6 +18,7 @@ let closing = false;
 async function shutdown() {
   if (closing) return;
   closing = true;
+  server.weixinChannel?.close();
   server.close();
   await workbench.stopRuntime().catch(() => {});
   workbench.store.save();

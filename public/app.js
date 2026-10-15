@@ -8,6 +8,7 @@ import { nativeDashboardHtml, nativeRoleTaskHtml, nativeTeamHtml } from './nativ
 import { guideHtml } from './guide.js';
 import { shortTaskTitle, organizationHtml, teamRoleCard, employeeDialogHtml } from './company-ui.js';
 import { draftScope, captureDrafts, restoreDrafts, rememberForm, forgetDraft } from './drafts.js';
+import { weixinSettingsHtml } from './weixin.js';
 
 const S = { overview: null, roles: [], choices: { palettes: [], emblems: [] }, departments: {}, runs: [], sessions: [], approvals: [], collaboration: { groups: [], tasks: [], messages: [] }, runtime: null, sse: 'connecting', models: null, workspaces: null, run: null, office: { focus: '', range: '48h', edges: [] } };
 const view = document.getElementById('view');
@@ -110,6 +111,9 @@ function onEvent(event) {
   const r = route();
   const viewingRun = (id) => r.page === 'task' && r.id === id;
   switch (event.type) {
+    case 'weixin.changed':
+      if (r.page === 'system' && !document.activeElement?.closest?.('[data-form="weixin-verify"]')) scheduleRefresh(200);
+      break;
     case 'native-collaboration.changed':
     case 'setup.changed':
       scheduleRefresh(300);
@@ -1276,18 +1280,19 @@ view.addEventListener('change', (event) => {
 });
 
 async function pageSystem(r) {
-  const [rt, desktop] = await Promise.all([api('GET', '/api/runtime'), api('GET', '/api/desktop-manager')]);
+  const [rt, desktop, weixin] = await Promise.all([api('GET', '/api/runtime'), api('GET', '/api/desktop-manager'), api('GET', '/api/channels/weixin')]);
   S.runtime = rt;
   if (!isCurrentRoute(r)) return;
   const caps = S.overview?.capabilities;
   const rtStatus = { ready: ['就绪', 'done'], starting: ['启动中', 'running'], stopped: ['未启动', 'neutral'], exited: ['已退出', 'error'], error: ['启动失败', 'error'] }[rt.status] || [rt.status, 'neutral'];
   const desktopFirst = r.query.get('desktop') === '1' || S.setup?.executionMode === 'desktop';
   const runtimeActions = `<button class="btn btn-sm" data-action="runtime" data-op="start">启动独立连接</button><button class="btn btn-sm" data-action="runtime" data-op="restart">${icon(ICONS.refresh, 14)}重启</button><button class="btn btn-sm btn-danger-ghost" data-action="runtime" data-op="stop">停止独立连接</button>`;
-  view.innerHTML = `${pageHead('连接设置', '选择独立 AI 团队，或沿用 Codex 桌面聊天。')}
+  view.innerHTML = `${pageHead('连接设置', '连接你的 AI 团队，以及日常交代任务的入口。')}
+    ${weixinSettingsHtml(weixin)}
     ${desktopFirst ? desktopSettingsHtml(desktop) : ''}
     <div class="grid-main">
       ${card('AI 团队连接', `<dl class="props"><dt>状态</dt><dd>${status(rtStatus)}</dd><dt>版本</dt><dd>${mono(rt.info?.userAgent?.split(' (')[0] || '—', rt.info?.userAgent)}</dd><dt>已连接对话</dt><dd>${mono(rt.loadedThreads?.length ?? 0)}</dd></dl><div class="page-actions desktop-connect-state">${runtimeActions}</div>${rt.lastError ? `<div class="notice" role="alert">${esc(rt.lastError)}</div>` : ''}<details class="detail-note"><summary>技术信息</summary><p>Codex App Server</p><dl class="props"><dt>进程</dt><dd>${mono(rt.pid ?? '—')}</dd><dt>程序</dt><dd>${mono(rt.codexBin)}</dd><dt>CODEX_HOME</dt><dd>${mono(rt.info?.codexHome || '—')}</dd><dt>启动于</dt><dd>${mono(clock(rt.info?.startedAt))}</dd>${rt.lastExit ? `<dt>上次退出</dt><dd>${mono(`code ${rt.lastExit.code} · ${clock(rt.lastExit.at)}`)}</dd>` : ''}</dl>${rt.stderrTail?.length ? `<details class="log"><summary>运行日志</summary><pre class="code">${esc(rt.stderrTail.join('\n'))}</pre></details>` : ''}</details>`)}
-      ${card('团队如何工作', S.setup?.mode === 'personal' ? `<ul class="plain"><li>经理安排工作，员工执行并交付。</li><li>每位员工有自己的 Codex 对话。</li><li>技能随任务提供，使用记录可查看。</li><li>暂停后可续办，停止后保留记录。</li></ul><details class="detail-note"><summary>可用能力</summary><p>当前连接提供文件与代码任务，未接入电脑控制、图像生成和微信工具。</p></details>` : `<ul class="plain"><li>员工对话支持新建、续接、中断和归档。</li><li>桌面端持有的原生会话保留原连接。</li><li>经理通过原生聊天派单，交接页保留记录。</li></ul>`)}
+      ${card('团队如何工作', S.setup?.mode === 'personal' ? `<ul class="plain"><li>经理安排工作，员工执行并交付。</li><li>每位员工有自己的 Codex 对话。</li><li>技能随任务提供，使用记录可查看。</li><li>暂停后可续办，停止后保留记录。</li></ul><details class="detail-note"><summary>可用能力</summary><p>当前连接提供文件与代码任务。微信作为同一经理的消息入口；电脑控制和图像生成工具尚未接入。</p></details>` : `<ul class="plain"><li>员工对话支持新建、续接、中断和归档。</li><li>桌面端持有的原生会话保留原连接。</li><li>经理通过原生聊天派单，交接页保留记录。</li></ul>`)}
     </div>
     ${desktopFirst ? '' : desktopSettingsHtml(desktop)}
     ${caps ? card('能力验证', `<div class="table cap-table"><div class="thead"><span>能力</span><span>结果</span><span>证据</span></div>${caps.checks.map((x) => `<div class="row"><span class="strong">${esc(x.label)}</span><span>${status([{ pass: '通过', limited: '受限', fail: '未通过' }[x.result] || x.result, x.result === 'pass' ? 'done' : x.result === 'limited' ? 'waiting' : 'error'])}</span><span class="small">${esc(x.evidence)}${x.runId ? ` · ${mono(x.runId.slice(-8))}` : ''}</span></div>`).join('')}</div><p class="muted small card-foot-note">${mono(`${clock(caps.startedAt)} – ${clock(caps.finishedAt)}`)} · ${esc(caps.codexVersion?.split(' (')[0] || '')}</p>`, { cls: 'flush' }) : ''}`;
@@ -1300,7 +1305,11 @@ view.addEventListener('click', async (event) => {
   if (!el) return;
   const action = el.dataset.action;
   try {
-    if (action === 'desktop-threads') {
+    if (action === 'weixin-disconnect' || action === 'weixin-reconnect') {
+      el.disabled = true;
+      await api(action === 'weixin-disconnect' ? 'DELETE' : 'POST', action === 'weixin-disconnect' ? '/api/channels/weixin' : '/api/channels/weixin/reconnect', {});
+      await pageSystem(route());
+    } else if (action === 'desktop-threads') {
       const current = route(); el.disabled = true;
       const data = await api('GET', '/api/desktop-connection/candidates');
       if (!isCurrentRoute(current)) return;
@@ -1529,7 +1538,10 @@ view.addEventListener('submit', async (event) => {
       location.hash = `#/team?${query}`;
       return;
     }
-    if (kind === 'desktop-connection') {
+    if (kind === 'weixin-connect' || kind === 'weixin-verify') {
+      await api('POST', kind === 'weixin-connect' ? '/api/channels/weixin/login' : '/api/channels/weixin/verify', kind === 'weixin-connect' ? { managerKey: f.managerKey.value } : { code: f.code.value });
+      await pageSystem(route());
+    } else if (kind === 'desktop-connection') {
       const result = await api('PUT', '/api/desktop-connection', { threadId: f.threadId.value.trim(), name: f.name.value.trim(), socketPath: f.socketPath.value.trim() });
       forgetDraft(form);
       toast(result.ready ? '桌面聊天已连接' : '设置已保存，请核对连接提示', result.ready ? 'done' : 'waiting');

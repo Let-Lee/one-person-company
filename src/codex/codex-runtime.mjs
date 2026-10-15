@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { JsonRpcProcess } from './jsonrpc-process.mjs';
 import { resolveCodexBin, codexInvocation } from './codex-bin.mjs';
 
-const CLIENT_INFO = { name: 'yewang_workbench', title: '野望科技工作台', version: '2.0.0' };
+const CLIENT_INFO = { name: 'yewang_workbench', title: '野望科技工作台', version: '2.1.0' };
 
 /**
  * Codex App Server runtime adapter.

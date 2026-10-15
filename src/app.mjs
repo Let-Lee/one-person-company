@@ -14,6 +14,8 @@ import { DesktopManager } from './desktop-manager.mjs';
 import { DesktopIpcError } from './codex/desktop-ipc.mjs';
 import { NativeCollaboration } from './native-collaboration.mjs';
 import { Onboarding } from './onboarding.mjs';
+import { WeixinChannel } from './weixin-channel.mjs';
+import { WeixinError } from './weixin-api.mjs';
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public');
@@ -110,11 +112,12 @@ function serveStatic(req, res, pathname) {
   });
 }
 
-export function createServer({ workbench, paths, port, desktopManager, nativeCollaboration }) {
+export function createServer({ workbench, paths, port, desktopManager, nativeCollaboration, weixinChannel }) {
   if (desktopManager === undefined) desktopManager = new DesktopManager({ dataDir: paths.dataDir, threadId: workbench.company.enabled ? workbench.company.managerThreadId() : undefined });
   workbench.desktopManager = desktopManager;
   if (nativeCollaboration === undefined) nativeCollaboration = workbench.company.enabled ? new NativeCollaboration({ company: workbench.company, dataDir: paths.dataDir }) : null;
   workbench.nativeCollaboration = nativeCollaboration;
+  if (weixinChannel === undefined) weixinChannel = new WeixinChannel({ workbench, desktopManager, dataDir: paths.dataDir });
   const clients = new Set();
   workbench.on('event', (event) => {
     const line = `data: ${JSON.stringify(event)}\n\n`;
@@ -126,6 +129,9 @@ export function createServer({ workbench, paths, port, desktopManager, nativeCol
   nativeCollaboration?.on('changed', () => {
     for (const res of clients) res.write(`data: ${JSON.stringify({ type: 'native-collaboration.changed' })}\n\n`);
   });
+  weixinChannel?.on('changed', () => {
+    for (const res of clients) res.write(`data: ${JSON.stringify({ type: 'weixin.changed' })}\n\n`);
+  });
   const heartbeat = setInterval(() => {
     for (const res of clients) res.write(': keep-alive\n\n');
   }, 20_000);
@@ -134,7 +140,12 @@ export function createServer({ workbench, paths, port, desktopManager, nativeCol
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
-  route('GET', /^\/api\/health$/, () => ({ ok: true, app: 'one-person-company', version: '2.0.0', instanceId: process.env.ONE_PERSON_COMPANY_INSTANCE || null }));
+  route('GET', /^\/api\/health$/, () => ({ ok: true, app: 'one-person-company', version: '2.1.0', instanceId: process.env.ONE_PERSON_COMPANY_INSTANCE || null }));
+  route('GET', /^\/api\/channels\/weixin$/, () => weixinChannel?.snapshot() || { status: 'unavailable', choices: [], requests: [], replies: [], counts: {} });
+  route('POST', /^\/api\/channels\/weixin\/login$/, (_m, body) => weixinChannel.beginLogin(body));
+  route('POST', /^\/api\/channels\/weixin\/verify$/, (_m, body) => weixinChannel.verify(body));
+  route('POST', /^\/api\/channels\/weixin\/reconnect$/, () => weixinChannel.reconnect());
+  route('DELETE', /^\/api\/channels\/weixin$/, () => weixinChannel.disconnect());
   route('GET', /^\/api\/overview$/, () => workbench.overview());
   route('GET', /^\/api\/setup$/, () => workbench.onboarding.snapshot());
   route('PATCH', /^\/api\/setup$/, (_m, body) => workbench.onboarding.draft(body));
@@ -247,12 +258,14 @@ export function createServer({ workbench, paths, port, desktopManager, nativeCol
       const result = await match.handler(url.pathname.match(match.pattern), body, url);
       send(res, 200, result ?? { ok: true });
     } catch (error) {
-      const status = error instanceof WorkbenchError || error instanceof NativeRouteError || error instanceof CollaborationError || error instanceof DesktopIpcError ? error.status : error.code === -32600 ? 409 : 500;
+      const status = error instanceof WorkbenchError || error instanceof NativeRouteError || error instanceof CollaborationError || error instanceof DesktopIpcError || error instanceof WeixinError ? error.status : error.code === -32600 ? 409 : 500;
       send(res, status, { error: error.message, code: error.code ?? null, details: error.details ?? null });
     }
   });
-  server.on('close', () => { clearInterval(heartbeat); desktopManager?.close(); nativeCollaboration?.close(); });
+  server.on('listening', () => weixinChannel?.start());
+  server.on('close', () => { clearInterval(heartbeat); weixinChannel?.close(); desktopManager?.close(); nativeCollaboration?.close(); });
   server.desktopManager = desktopManager;
   server.nativeCollaboration = nativeCollaboration;
+  server.weixinChannel = weixinChannel;
   return server;
 }
