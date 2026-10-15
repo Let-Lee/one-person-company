@@ -83,7 +83,7 @@ try {
 '@
   Set-Content -LiteralPath (Join-Path $companyHome 'run-company.ps1') -Value $companyBootstrap -Encoding UTF8
   foreach ($item in @(@('启动公司.cmd','start'),@('停止公司.cmd','stop'),@('检查公司.cmd','doctor'))) {
-    $companyBatch = '@echo off' + "`r`n" + 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-company.ps1" -Action ' + $item[1] + "`r`n" + 'if errorlevel 1 pause' + "`r`n"
+    $companyBatch = '@echo off' + "`r`n" + 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-company.ps1" -Action ' + $item[1] + "`r`n" + 'set "company_result=%errorlevel%"' + "`r`n" + 'if not "%company_result%"=="0" if not defined CI pause' + "`r`n" + 'exit /b %company_result%' + "`r`n"
     Set-Content -LiteralPath (Join-Path $companyHome $item[0]) -Value $companyBatch -Encoding ASCII
   }
   $env:PORT = [string]$Port

@@ -15,7 +15,7 @@ export function resolveCodexBin(env = process.env) {
       try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch { /* next installation */ }
     }
   }
-  return process.platform === 'darwin' ? APP_BUNDLED : 'codex.exe';
+  return process.platform === 'darwin' ? APP_BUNDLED : process.platform === 'win32' ? 'codex.exe' : 'codex';
 }
 
 function unwrapCodexShim(binary) {

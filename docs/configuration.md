@@ -7,7 +7,7 @@
 | `PORT` | 本机端口 | `4318` |
 | `CODEX_BIN` | 指定可执行的 Codex CLI | 优先使用 PATH 中的 Codex，再检查桌面版附带程序 |
 | `CODEX_HOME` | 使用你自己已有的 Codex 配置目录 | 由 Codex 决定；本程序不复制账号凭据 |
-| `CODEX_DESKTOP_SOCKET` | 自定义桌面本机入口 | `CODEX_HOME/ipc/ipc.sock` 或 `~/.codex/ipc/ipc.sock` |
+| `CODEX_DESKTOP_SOCKET` | 自定义桌面本机入口 | Mac 为 `CODEX_HOME/ipc/ipc.sock` 或 `~/.codex/ipc/ipc.sock`；Windows 为本机管道 `\\.\pipe\codex-ipc` |
 | `YEWANG_DATA_DIR` | 岗位、任务、会话与设置存放目录 | 源码目录的 `.data/`；一键安装会使用独立 `data/` |
 | `YEWANG_RUNTIME_DIR` | 启动记录与服务日志 | 数据目录的 `runtime/` |
 | `YEWANG_WORKSPACES_ROOT` | 独立任务的工作目录根目录 | 数据目录的 `workspaces/` |

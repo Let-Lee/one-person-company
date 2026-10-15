@@ -1,4 +1,4 @@
-﻿param([string]$EvidencePath = (Join-Path $env:TEMP 'windows-company-validation.json'))
+﻿param([string]$EvidencePath = (Join-Path $env:TEMP 'windows-company-validation.json'), [switch]$PublicDownload)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
@@ -27,6 +27,11 @@ try {
   } finally { Pop-Location }
   $companyArchive = Join-Path $companyTemp 'source.zip'
   Compress-Archive -Path $companyStage -DestinationPath $companyArchive
+  if ($PublicDownload) {
+    if ($env:GITHUB_SHA -notmatch '^[a-f0-9]{40}$') { throw 'Public verification requires the exact commit SHA.' }
+    $companyArchive = 'https://github.com/Let-Lee/one-person-company/archive/' + $env:GITHUB_SHA + '.zip'
+    $companyEvidence.downloadSource = $companyArchive
+  }
   $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
   $listener.Start(); $companyPort = $listener.LocalEndpoint.Port; $listener.Stop()
   & (Join-Path $companyRepo 'install.ps1') -InstallRoot $companyInstall -Archive $companyArchive -Port $companyPort -NoOpen
@@ -53,6 +58,11 @@ try {
   if (Test-Path -LiteralPath (Join-Path $env:CODEX_HOME 'auth.json')) { throw 'Unexpected credentials.' }
   if (Test-Path -LiteralPath (Join-Path $companyInstall 'data/desktop-manager.json')) { throw 'Unexpected desktop binding.' }
   $companyEvidence.checks.noCredentialsOrAuthorBinding = $true
+  & (Join-Path $companyInstall '停止公司.cmd')
+  if ($LASTEXITCODE -ne 0) { throw 'CMD stop launcher failed.' }
+  & (Join-Path $companyInstall '启动公司.cmd')
+  if ($LASTEXITCODE -ne 0 -or (Invoke-RestMethod ($companyBase + '/api/setup')).name -ne '示例公司') { throw 'CMD restart launcher failed.' }
+  $companyEvidence.checks.cmdLaunchers = $true
   $companyEvidence.success = $true
 } catch {
   $companyEvidence.success = $false
