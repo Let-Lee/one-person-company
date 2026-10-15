@@ -34,7 +34,7 @@ try {
   $companyTemp = Join-Path ([IO.Path]::GetTempPath()) ('one-person-company-' + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $companyTemp | Out-Null
   $companyZip = Join-Path $companyTemp 'source.zip'
-  if (-not $Archive) { $Archive = 'https://github.com/Let-Lee/one-person-company/archive/refs/heads/main.zip' }
+  if (-not $Archive) { $Archive = 'https://codeload.github.com/Let-Lee/one-person-company/zip/refs/heads/main' }
   Write-Host '正在下载公司源码…'
   if (Test-Path -LiteralPath $Archive -PathType Leaf) { Copy-Item -LiteralPath $Archive -Destination $companyZip }
   else {

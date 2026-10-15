@@ -29,7 +29,7 @@ try {
   Compress-Archive -Path $companyStage -DestinationPath $companyArchive
   if ($PublicDownload) {
     if ($env:GITHUB_SHA -notmatch '^[a-f0-9]{40}$') { throw 'Public verification requires the exact commit SHA.' }
-    $companyArchive = 'https://github.com/Let-Lee/one-person-company/archive/' + $env:GITHUB_SHA + '.zip'
+    $companyArchive = 'https://codeload.github.com/Let-Lee/one-person-company/zip/' + $env:GITHUB_SHA
     $companyEvidence.downloadSource = $companyArchive
   }
   $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)

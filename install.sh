@@ -35,7 +35,7 @@ if [ -e "$company_home" ] && [ ! -f "$company_home/.one-person-company" ] && [ -
 fi
 company_temp="$(mktemp -d "${TMPDIR:-/tmp}/one-person-company.XXXXXX")"
 trap 'rm -rf "$company_temp"' EXIT
-archive_url="${ONE_PERSON_COMPANY_ARCHIVE:-https://github.com/Let-Lee/one-person-company/archive/refs/heads/main.zip}"
+archive_url="${ONE_PERSON_COMPANY_ARCHIVE:-https://codeload.github.com/Let-Lee/one-person-company/zip/refs/heads/main}"
 printf '%s\n' '正在下载公司源码…'
 curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 --retry 1 "$archive_url" -o "$company_temp/source.zip"
 /usr/bin/ditto -x -k "$company_temp/source.zip" "$company_temp/source"
