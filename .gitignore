@@ -1,0 +1,14 @@
+.data/
+.runtime/
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+*.zip
+.codex/
+公司/
+auth.json
+*.pem
+*.key

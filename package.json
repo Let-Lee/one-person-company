@@ -1,0 +1,24 @@
+{
+  "name": "one-person-company",
+  "version": "2.0.0",
+  "private": true,
+  "description": "一个人的公司：由 AI 经理和员工完成任务，支持技能、审批、停止续办与结果回传。",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "company": "node scripts/manage.mjs start --open",
+    "stop": "node scripts/manage.mjs stop",
+    "status": "node scripts/manage.mjs status",
+    "doctor": "node scripts/manage.mjs doctor",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "MIT",
+  "author": "Let-Lee",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Let-Lee/one-person-company.git"
+  }
+}
