@@ -7,6 +7,7 @@ import net from 'node:net';
 import { EventEmitter } from 'node:events';
 import { DesktopIpc, DesktopIpcError } from '../src/codex/desktop-ipc.mjs';
 import { DesktopManager, applyDesktopPatches } from '../src/desktop-manager.mjs';
+import { fixtureEndpoint, restrictSocket } from './ipc-fixture.mjs';
 
 const DESKTOP_MANAGER_THREAD = '00000000-0000-4000-8000-000000000001';
 
@@ -178,7 +179,7 @@ test('concurrent identical requests make one native call and a disconnected owne
 
 test('IPC decodes fragmented frames and rejects response from a mismatched owner', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yewang-ipc-')); fs.chmodSync(dir, 0o700);
-  const socketPath = path.join(dir, 'ipc.sock'); const peers = new Set();
+  const socketPath = fixtureEndpoint(dir); const peers = new Set();
   const server = net.createServer((socket) => {
     peers.add(socket); let pending = Buffer.alloc(0);
     socket.on('data', (chunk) => { pending = Buffer.concat([pending, chunk]); while (pending.length >= 4 && pending.length >= 4 + pending.readUInt32LE(0)) {
@@ -188,7 +189,7 @@ test('IPC decodes fragmented frames and rejects response from a mismatched owner
       socket.write(frame.subarray(0, 2)); setImmediate(() => socket.write(frame.subarray(2)));
     } });
   });
-  await new Promise((r) => server.listen(socketPath, r)); fs.chmodSync(socketPath, 0o600);
+  await new Promise((r) => server.listen(socketPath, r)); restrictSocket(socketPath);
   const client = new DesktopIpc({ socketPath, timeoutMs: 1000 });
   try {
     await client.connect(); assert.equal(client.clientId, 'assigned-client');
@@ -199,7 +200,7 @@ test('IPC decodes fragmented frames and rejects response from a mismatched owner
 
 test('IPC accepts a fragmented desktop history larger than 16 MB and still checks the response owner', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'company-large-ipc-')); fs.chmodSync(dir, 0o700);
-  const socketPath = path.join(dir, 'ipc.sock'), peers = new Set();
+  const socketPath = fixtureEndpoint(dir), peers = new Set();
   const server = net.createServer((socket) => {
     peers.add(socket); let pending = Buffer.alloc(0);
     socket.on('data', (chunk) => {
@@ -213,7 +214,7 @@ test('IPC accepts a fragmented desktop history larger than 16 MB and still check
       }
     });
   });
-  await new Promise((resolve) => server.listen(socketPath, resolve)); fs.chmodSync(socketPath, 0o600);
+  await new Promise((resolve) => server.listen(socketPath, resolve)); restrictSocket(socketPath);
   const client = new DesktopIpc({ socketPath, timeoutMs: 5000 });
   try {
     await client.connect();

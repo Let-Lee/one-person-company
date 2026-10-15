@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { resolveCodexBin } from '../src/codex/codex-bin.mjs';
+import { resolveCodexBin, codexInvocation } from '../src/codex/codex-bin.mjs';
+import { DesktopIpc } from '../src/codex/desktop-ipc.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.resolve(process.env.YEWANG_DATA_DIR || path.join(root, '.data'));
@@ -29,7 +29,8 @@ const same = (saved, live) => Boolean(saved && live && saved.instanceId === live
 function alive(pid) { try { if (!Number.isInteger(pid) || pid < 1) return false; process.kill(pid, 0); return true; } catch { return false; } }
 function openPage() {
   if (!process.argv.includes('--open') || process.env.ONE_PERSON_COMPANY_NO_OPEN === '1') return;
-  if (process.platform === 'darwin') spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+  const opener = process.platform === 'win32' ? ['rundll32.exe', ['url.dll,FileProtocolHandler', url]] : process.platform === 'darwin' ? ['open', [url]] : null;
+  if (opener) { const child = spawn(opener[0], opener[1], { stdio: 'ignore', detached: true, windowsHide: true }); child.on('error', () => {}); child.unref(); }
 }
 async function start() {
   const previous = record(), live = await health();
@@ -43,7 +44,7 @@ async function start() {
   const logFile = path.join(runtimeDir, 'server.log');
   const fd = fs.openSync(logFile, 'a', 0o600);
   const child = spawn(process.execPath, [path.join(root, 'src/server.mjs')], {
-    cwd: root, detached: true, stdio: ['ignore', fd, fd],
+    cwd: root, detached: true, windowsHide: true, stdio: ['ignore', fd, fd],
     env: { ...process.env, PORT: String(port), YEWANG_DATA_DIR: dataDir, YEWANG_NO_AUTOSTART: '1', ONE_PERSON_COMPANY_INSTANCE: instanceId },
   });
   fs.closeSync(fd); child.unref();
@@ -66,6 +67,11 @@ async function stop() {
     if (!live) { if (alive(saved.pid)) throw Error('原进程仍存在但无法确认连接，已保留记录，没有强制停止。'); fs.unlinkSync(file); print({ running: false, stopped: false }, '公司已停止，清理了过期启动记录。'); return; }
     throw Error('当前端口与启动记录不匹配，不会停止其他进程。');
   }
+  if (process.platform === 'win32') {
+    // Stop Codex and persist work before Windows terminates the HTTP process.
+    const response = await fetch(url + '/api/runtime/stop', { method: 'POST', headers: { 'x-yewang-workbench': '1', 'content-type': 'application/json' }, body: '{}', signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw Error('运行服务未能保存并停止，已保留进程，请检查页面。');
+  }
   process.kill(saved.pid, 'SIGTERM');
   for (let attempt = 0; attempt < 40; attempt++) {
     if (!same(saved, await health())) {
@@ -76,14 +82,13 @@ async function stop() {
   }
   throw Error('服务尚未退出，请稍后检查；没有强制终止其他进程。');
 }
-function doctor() {
+async function doctor() {
   const node = Number(process.versions.node.split('.')[0]) >= 20;
   const codex = resolveCodexBin(); let codexVersion = null;
-  try { fs.accessSync(codex, fs.constants.X_OK); codexVersion = execFileSync(codex, ['--version'], { encoding: 'utf8', timeout: 5000 }).trim(); } catch { /* report only */ }
-  const socketPath = process.env.CODEX_DESKTOP_SOCKET || path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'ipc/ipc.sock');
-  let desktopAvailable = false;
-  try { desktopAvailable = fs.lstatSync(socketPath).isSocket(); } catch { /* desktop may be closed */ }
-  const result = { node, nodeVersion: process.versions.node, platform: process.platform, codexAvailable: Boolean(codexVersion), codexVersion, desktopAvailable };
+  try { const invocation = codexInvocation(codex, ['--version']); codexVersion = execFileSync(invocation.command, invocation.args, { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim(); } catch { /* report only */ }
+  const desktop = new DesktopIpc({ timeoutMs: 1500 }); let desktopAvailable = false;
+  try { await desktop.connect(); desktopAvailable = true; } catch { /* desktop may be closed */ } finally { desktop.close(); }
+  const result = { node, nodeVersion: process.versions.node, platform: process.platform, codexAvailable: Boolean(codexVersion), codexVersion, desktopAvailable, desktopTransport: process.platform === 'win32' ? 'named-pipe' : 'unix-socket' };
   print(result, `Node.js：${process.versions.node}${node ? '' : '（需要 20 或以上）'}\nCodex：${codexVersion || '未找到，请安装 Codex 或设置 CODEX_BIN'}\n桌面入口：${desktopAvailable ? '已找到，实际连接请在页面中检查' : '尚未找到，桌面模式请先打开 Codex'}\n检查不会登录账号或运行模型任务。`);
   if (!node || !codexVersion) process.exitCode = 1;
 }
@@ -94,6 +99,6 @@ try {
   if (command === 'start') await start();
   else if (command === 'stop') await stop();
   else if (command === 'status') { const live = await health(); print({ running: same(record(), live), portOccupiedByCompany: Boolean(live), url }, same(record(), live) ? `公司正在运行：${url}` : '此目录的公司未运行。'); }
-  else if (command === 'doctor') doctor();
+  else if (command === 'doctor') await doctor();
   else throw Error('用法：node scripts/manage.mjs start|stop|status|doctor [--open] [--json]');
 } catch (error) { console.error(error.message); process.exitCode = 1; }

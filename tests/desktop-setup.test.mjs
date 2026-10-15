@@ -7,10 +7,11 @@ import net from 'node:net';
 import { createWorkbench, createServer } from '../src/app.mjs';
 import { DesktopManager } from '../src/desktop-manager.mjs';
 import { DesktopIpc } from '../src/codex/desktop-ipc.mjs';
+import { fixtureEndpoint, restrictSocket } from './ipc-fixture.mjs';
 
 test('a personal company can bind a desktop chat through HTTP and enter desktop mode with zero independent roles or turns', async (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'one-company-desktop-')); fs.chmodSync(tmp, 0o700);
-  const socketPath = path.join(tmp, 'ipc.sock'), peers = new Set(), requests = [];
+  const socketPath = fixtureEndpoint(tmp), peers = new Set(), requests = [];
   const desktop = net.createServer((socket) => {
     peers.add(socket); let buffer = Buffer.alloc(0);
     const send = (value) => { const body = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4); header.writeUInt32LE(body.length); socket.write(Buffer.concat([header, body])); };
@@ -23,7 +24,7 @@ test('a personal company can bind a desktop chat through HTTP and enter desktop 
       }
     });
   });
-  await new Promise((resolve) => desktop.listen(socketPath, resolve)); fs.chmodSync(socketPath, 0o600);
+  await new Promise((resolve) => desktop.listen(socketPath, resolve)); restrictSocket(socketPath);
   const env = { YEWANG_DATA_DIR: path.join(tmp, 'data'), YEWANG_WORKSPACES_ROOT: path.join(tmp, 'workspaces') };
   const ctx = createWorkbench({ env });
   const manager = new DesktopManager({ dataDir: env.YEWANG_DATA_DIR, client: new DesktopIpc({ socketPath, timeoutMs: 1000 }) });

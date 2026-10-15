@@ -1,9 +1,7 @@
-import fs from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { desktopEndpoint, checkDesktopEndpoint } from './platform.mjs';
 
 // The installed desktop's local follower protocol. This client never becomes an owner,
 // launches an app-server, changes settings, or handles another thread's requests.
@@ -25,7 +23,7 @@ export class DesktopIpcError extends Error {
 }
 
 export class DesktopIpc extends EventEmitter {
-  constructor({ socketPath = process.env.CODEX_DESKTOP_SOCKET || path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'ipc/ipc.sock'), timeoutMs = 15_000 } = {}) {
+  constructor({ socketPath = desktopEndpoint(), timeoutMs = 15_000 } = {}) {
     super(); this.socketPath = socketPath; this.timeoutMs = timeoutMs;
     this.socket = null; this.clientId = null; this.pending = new Map();
     this.#resetFrames(); this.connecting = null;
@@ -39,12 +37,8 @@ export class DesktopIpc extends EventEmitter {
   }
 
   async #connect() {
-    const uid = process.getuid?.();
-    const dir = fs.lstatSync(path.dirname(this.socketPath));
-    const endpoint = fs.lstatSync(this.socketPath);
-    if (uid == null || !dir.isDirectory() || dir.uid !== uid || (dir.mode & 0o022) || !endpoint.isSocket() || endpoint.uid !== uid || (endpoint.mode & 0o077)) {
-      throw new DesktopIpcError('桌面本机入口的所有者或访问权限不符');
-    }
+    try { checkDesktopEndpoint(this.socketPath); }
+    catch (error) { throw new DesktopIpcError(error.message); }
     const socket = net.createConnection(this.socketPath);
     this.socket = socket; this.#resetFrames();
     socket.on('data', (chunk) => this.#read(chunk));

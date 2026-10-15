@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { JsonRpcProcess } from './jsonrpc-process.mjs';
-import { resolveCodexBin } from './codex-bin.mjs';
+import { resolveCodexBin, codexInvocation } from './codex-bin.mjs';
 
 const CLIENT_INFO = { name: 'yewang_workbench', title: '野望科技工作台', version: '2.0.0' };
 
@@ -57,7 +57,7 @@ export class CodexRuntime extends EventEmitter {
 
   async #start() {
     this.#setStatus('starting');
-    const rpc = new JsonRpcProcess({ command: this.codexBin, args: this.args, cwd: this.cwd, env: this.env, name: 'codex-app-server' });
+    const rpc = new JsonRpcProcess({ ...codexInvocation(this.codexBin, this.args), cwd: this.cwd, env: this.env, name: 'codex-app-server' });
     this.rpc = rpc;
     rpc.on('notification', (message) => this.emit('notification', message));
     rpc.on('serverRequest', (message) => this.emit('serverRequest', message));

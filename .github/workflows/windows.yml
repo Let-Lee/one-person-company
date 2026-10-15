@@ -1,0 +1,32 @@
+name: Windows installation and runtime
+on:
+  push:
+    branches: [main, codex/windows-support]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Isolated regression checks
+        run: npm test
+      - name: Install the official Codex CLI without account credentials
+        run: npm install --global @openai/codex
+      - name: Windows PowerShell 5.1 installation and restart
+        shell: powershell
+        run: ./scripts/verify-windows.ps1 -EvidencePath "$env:RUNNER_TEMP/windows-powershell.json"
+      - name: PowerShell 7 installation and restart
+        shell: pwsh
+        run: ./scripts/verify-windows.ps1 -EvidencePath "$env:RUNNER_TEMP/windows-pwsh.json"
+      - name: Save platform evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation
+          path: ${{ runner.temp }}/windows-*.json

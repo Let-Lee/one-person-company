@@ -39,6 +39,7 @@ export class JsonRpcProcess extends EventEmitter {
       cwd: this.cwd,
       env: this.env,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     this.child = child;
     child.on('error', (error) => {
@@ -96,7 +97,8 @@ export class JsonRpcProcess extends EventEmitter {
     if (!child) return;
     const done = new Promise((resolve) => child.once('exit', resolve));
     child.stdin.end();
-    child.kill('SIGTERM');
+    // Windows SIGTERM terminates immediately. Give the server time to close tools on EOF.
+    if (process.platform !== 'win32') child.kill('SIGTERM');
     const timer = setTimeout(() => {
       if (this.child === child) child.kill('SIGKILL');
     }, graceMs);
