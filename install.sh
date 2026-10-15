@@ -38,7 +38,7 @@ trap 'rm -rf "$company_temp"' EXIT
 archive_url="${ONE_PERSON_COMPANY_ARCHIVE:-https://github.com/Let-Lee/one-person-company/archive/refs/heads/main.zip}"
 printf '%s\n' '正在下载公司源码…'
 curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 --retry 1 "$archive_url" -o "$company_temp/source.zip"
-unzip -q "$company_temp/source.zip" -d "$company_temp/source"
+/usr/bin/ditto -x -k "$company_temp/source.zip" "$company_temp/source"
 company_source=''
 for candidate in "$company_temp/source"/*; do if [ -d "$candidate" ]; then company_source="$candidate"; break; fi; done
 [ -n "$company_source" ] && [ -f "$company_source/scripts/manage.mjs" ] && [ -f "$company_source/src/server.mjs" ] || { printf '%s\n' '下载内容不是有效的公司发布包。' >&2; exit 1; }
