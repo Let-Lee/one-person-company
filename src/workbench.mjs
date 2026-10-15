@@ -517,6 +517,7 @@ export class Workbench extends EventEmitter {
     const run = {
       id: id('run'),
       kind: body.kind || 'dispatch',
+      parentRunId: body.kind === 'continue' ? session.lastRunId || null : null,
       sessionId: session.id,
       roleKey: session.roleKey,
       roleName: role.name,
@@ -637,12 +638,18 @@ export class Workbench extends EventEmitter {
     if (run.model) params.model = run.model;
     const result = await runtime.startTurn(params);
     run.turnId = result.turn.id;
+    this.#recordActualModel(run, result.turn, 'turn/start');
     if (run.status === 'starting') run.status = 'running';
     run.startedAt ||= now();
     this.collaboration.runStarted(run);
     this.store.saveSoon();
     this.#emit('run.updated', { run: this.#runSummary(run) });
     if (run.stopRequested) await runtime.interruptTurn(session.threadId, run.turnId).catch(() => {});
+  }
+
+  #recordActualModel(run, turn, source) {
+    if (turn?.id !== run.turnId || typeof turn.model !== 'string' || !turn.model.trim()) return;
+    run.actualModel = { id: turn.model, provider: turn.modelProvider || null, turnId: turn.id, source, observedAt: now() };
   }
 
   #failRun(run, error) {
@@ -768,6 +775,7 @@ export class Workbench extends EventEmitter {
     switch (method) {
       case 'turn/started':
         run.turnId ||= params.turn.id;
+        this.#recordActualModel(run, params.turn, 'turn/started');
         run.startedAt ||= now();
         this.collaboration.runStarted(run);
         if (run.status === 'starting') run.status = 'running';

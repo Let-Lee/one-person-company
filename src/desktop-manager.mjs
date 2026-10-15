@@ -91,9 +91,12 @@ export class DesktopManager extends EventEmitter {
   snapshot() {
     const ready = Boolean(this.conversation && this.ownerClientId && this.client.clientId);
     const activeTurn = desktopTurns(this.conversation).findLast((turn) => turn.status === 'inProgress');
+    const modelTurn = activeTurn || desktopTurns(this.conversation).findLast(turn => turn.status === 'completed' || turn.status === 'interrupted');
+    const model = modelTurn?.model || modelTurn?.params?.model;
+    const modelDisplay = typeof model === 'string' && model.trim() ? { text: `${activeTurn ? '' : '上次 · '}${model}`, source: `桌面逐轮元数据 · 回合 ${modelTurn.turnId || modelTurn.id}；不推断供应商底层模型` } : { text: '待确认', source: '桌面运行端未返回逐轮模型记录，当前配置不作依据' };
     const busy = ready && (this.conversation.threadRuntimeStatus?.type === 'active' || Boolean(activeTurn));
     return { configured: Boolean(this.threadId), target: this.threadId ? { threadId: this.threadId, hostId: 'local', roleTitle: '总经理', name: this.name } : null, ready, busy,
-      channel: 'desktop-ipc-follower', connectedAt: this.connectedAt, lastError: this.lastError,
+      modelDisplay, channel: 'desktop-ipc-follower', connectedAt: this.connectedAt, lastError: this.lastError,
       socketPath: this.client.socketPath || '', ownerClientId: this.ownerClientId, revision: this.revision, messages: this.messages.filter((m) => m.threadId === this.threadId).slice(-30) };
   }
 

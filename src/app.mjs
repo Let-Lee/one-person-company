@@ -15,6 +15,7 @@ import { DesktopIpcError } from './codex/desktop-ipc.mjs';
 import { NativeCollaboration } from './native-collaboration.mjs';
 import { Onboarding } from './onboarding.mjs';
 import { WeixinChannel } from './weixin-channel.mjs';
+import { taskGroups } from '../public/task-model.js';
 import { WeixinError } from './weixin-api.mjs';
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,12 +141,13 @@ export function createServer({ workbench, paths, port, desktopManager, nativeCol
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
-  route('GET', /^\/api\/health$/, () => ({ ok: true, app: 'one-person-company', version: '2.1.0', instanceId: process.env.ONE_PERSON_COMPANY_INSTANCE || null }));
+  route('GET', /^\/api\/health$/, () => ({ ok: true, app: 'one-person-company', version: '2.1.1', instanceId: process.env.ONE_PERSON_COMPANY_INSTANCE || null }));
   route('GET', /^\/api\/channels\/weixin$/, () => weixinChannel?.snapshot() || { status: 'unavailable', choices: [], requests: [], replies: [], counts: {} });
   route('POST', /^\/api\/channels\/weixin\/login$/, (_m, body) => weixinChannel.beginLogin(body));
   route('POST', /^\/api\/channels\/weixin\/verify$/, (_m, body) => weixinChannel.verify(body));
   route('POST', /^\/api\/channels\/weixin\/reconnect$/, () => weixinChannel.reconnect());
   route('DELETE', /^\/api\/channels\/weixin$/, () => weixinChannel.disconnect());
+  route('GET', /^\/api\/task-groups$/, () => ({ groups: taskGroups(Object.values(workbench.state.runs).map(({ items, ...r }) => r), { tasks: Object.values(workbench.state.collaboration.tasks), messages: Object.values(workbench.state.collaboration.messages) }, Object.values(workbench.state.approvals)) }));
   route('GET', /^\/api\/overview$/, () => workbench.overview());
   route('GET', /^\/api\/setup$/, () => workbench.onboarding.snapshot());
   route('PATCH', /^\/api\/setup$/, (_m, body) => workbench.onboarding.draft(body));

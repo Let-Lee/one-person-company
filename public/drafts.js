@@ -20,7 +20,7 @@ export function restoreDrafts(container) {
         const row = saved.values.find((r) => r.name === el.name && (['checkbox', 'radio'].includes(el.type) ? r.value === el.value : true));
         if (!row) continue;
         if (['checkbox', 'radio'].includes(el.type)) el.checked = Boolean(row.checked);
-        else if (el.tagName !== 'SELECT' || [...el.options].some((o) => o.value === row.value)) el.value = row.value;
+        else if (el.value !== row.value && (el.tagName !== 'SELECT' || [...el.options].some((o) => o.value === row.value))) el.value = row.value;
       }
       if (saved.requestId) form.dataset.requestId = saved.requestId;
       form.dataset.draftDirty = 'true';

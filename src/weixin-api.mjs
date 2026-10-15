@@ -77,5 +77,5 @@ export class WeixinApi {
   send(credentials, { clientId, contextToken, text }, signal) {
     return this.request('ilink/bot/sendmessage', { credentials, body: { msg: { from_user_id: '', to_user_id: credentials.ownerId, client_id: clientId, message_type: 2, message_state: 2, context_token: contextToken, item_list: [{ type: 1, text_item: { text } }] }, base_info: this.info() }, signal });
   }
-  info() { return { channel_version: '2.1.0', bot_agent: 'OnePersonCompany/2.1.0' }; }
+  info() { return { channel_version: '2.1.1', bot_agent: 'OnePersonCompany/2.1.1' }; }
 }

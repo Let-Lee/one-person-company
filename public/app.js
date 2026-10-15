@@ -8,6 +8,7 @@ import { nativeDashboardHtml, nativeRoleTaskHtml, nativeTeamHtml } from './nativ
 import { guideHtml } from './guide.js';
 import { shortTaskTitle, organizationHtml, teamRoleCard, employeeDialogHtml } from './company-ui.js';
 import { draftScope, captureDrafts, restoreDrafts, rememberForm, forgetDraft } from './drafts.js';
+import { actualRoleModel } from './task-model.js';
 import { weixinSettingsHtml } from './weixin.js';
 
 const S = { overview: null, roles: [], choices: { palettes: [], emblems: [] }, departments: {}, runs: [], sessions: [], approvals: [], collaboration: { groups: [], tasks: [], messages: [] }, runtime: null, sse: 'connecting', models: null, workspaces: null, run: null, office: { focus: '', range: '48h', edges: [] } };
@@ -54,15 +55,16 @@ const roleActionHref = (role) => role.source === 'company' ? role.key === 'gener
 // ---------------- data ----------------
 
 async function loadCore() {
-  const [overview, roles, runs, sessions, approvals, collaboration, native, setup] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/roles'), api('GET', '/api/runs'), api('GET', '/api/sessions'), api('GET', '/api/approvals'), api('GET', '/api/collaboration'), api('GET', '/api/native-collaboration'), api('GET', '/api/setup')]);
+  const [overview, roles, runs, sessions, approvals, collaboration, native, setup, grouped] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/roles'), api('GET', '/api/runs'), api('GET', '/api/sessions'), api('GET', '/api/approvals'), api('GET', '/api/collaboration'), api('GET', '/api/native-collaboration'), api('GET', '/api/setup'), api('GET', '/api/task-groups')]);
   const nativeRoles = new Map(native.roles.map((r) => [r.roleKey, r]));
   const decorated = roles.roles.map((role) => {
+    role = { ...role, modelDisplay: actualRoleModel(role, grouped.groups.flatMap(g => g.runs)) };
     const activity = role.source === 'company' && nativeRoles.get(role.key);
     return activity ? { ...role, nativeActivity: activity, liveState: activity.liveState, currentNativeTask: activity.taskId ? { id: activity.taskId, status: activity.liveState, turnId: activity.turnId, progressText: activity.progressText } : null } : role;
   });
   overview.counts.active = runs.runs.filter((r) => ACTIVE.has(r.status)).length + (native.counts.active || 0);
   overview.nativeCollaboration = { ready: native.ready, counts: native.counts };
-  Object.assign(S, { overview, native, setup, runtime: overview.runtime, roles: decorated, choices: roles.appearanceChoices, departments: roles.departments, runs: runs.runs, sessions: sessions.sessions, approvals: approvals.approvals, collaboration });
+  Object.assign(S, { overview, native, setup, runtime: overview.runtime, roles: decorated, choices: roles.appearanceChoices, departments: roles.departments, runs: runs.runs, sessions: sessions.sessions, approvals: approvals.approvals, collaboration, taskGroups: grouped.groups });
   draftScope(setup.manager?.key || setup.name);
 }
 
@@ -78,7 +80,7 @@ function scheduleRefresh(delay = 300) {
       if (page === 'guide') return;
       if (page === 'office') await renderPage({ quiet: true });
       else if (page === 'role' && roleByKey(route().id)?.source === 'company' && !document.activeElement?.closest?.('[data-form]')) await renderPage({ quiet: true });
-      else if (page === 'chat' && !view.querySelector('textarea')?.value) await renderPage({ quiet: true });
+      else if (page === 'chat') await renderPage({ quiet: true });
       else if (!view.querySelector('[data-stable]') && !['task', 'dispatch'].includes(page)) await renderPage({ quiet: true });
     } catch (error) {
       console.warn(error);
@@ -208,7 +210,7 @@ const PARENT = { task: ['tasks', '任务'], chat: ['sessions', '会话'], role: 
 function renderSidebar() {
   const r = route();
   const pending = S.approvals.filter((a) => a.status === 'pending').length;
-  const active = S.runs.filter((x) => ACTIVE.has(x.status)).length;
+  const active = (S.taskGroups || []).filter(g => groupMatches(g, 'active')).length;
   const nav = NAV.map((g) => `${g.secondary ? `<details class="nav-more"${g.items.some(([key]) => key === r.page || PARENT[r.page]?.[0] === key) ? ' open' : ''}><summary>${g.group}</summary>` : g.group ? `<div class="nav-group">${g.group}</div>` : ''}${g.items
     .map(([key, label, d]) => {
       const count = key === 'approvals' ? pending : key === 'tasks' ? active : key === 'team' ? S.native?.counts?.awaitingHandling || 0 : 0;
@@ -216,7 +218,7 @@ function renderSidebar() {
       return `<a class="nav-item ${on ? 'active' : ''}" data-nav="${key}" href="#/${key}" ${on ? 'aria-current="page"' : ''}>${icon(d)}<span>${key === 'manager' && S.setup?.mode === 'personal' ? '总经理' : label}</span>${count ? `<em class="count tone-${key === 'approvals' ? 'waiting' : 'running'}">${count}</em>` : ''}</a>`;
     })
     .join('')}${g.secondary ? '</details>' : ''}`).join('');
-  const roleSignature = JSON.stringify([r.page === 'role' ? r.id : '', S.roles.map(({ key, name, roleTitle, liveState, appearance, project }) => ({ key, name, roleTitle, liveState, appearance, project }))]);
+  const roleSignature = JSON.stringify([r.page === 'role' ? r.id : '', S.roles.map(({ key, name, roleTitle, liveState, appearance, project, modelDisplay }) => ({ key, name, roleTitle, liveState, appearance, project, modelDisplay }))]);
   const roles = sidebar.dataset.roleSignature === roleSignature ? '' : S.roles
     .map((role) => {
       const [label, tone] = roleStatus(role.liveState);
@@ -603,7 +605,7 @@ async function saveGuideDraft() {
 
 const DESKTOP_MESSAGE_LABEL = { submitting: ['提交中', 'running'], submitted: ['已提交', 'queued'], received: ['经理已收到 · 回复中', 'running'], completed: ['已收到真实回复', 'done'], completed_empty: ['本轮结束 · 无回复正文', 'neutral'], error: ['本轮失败', 'error'], unknown: ['提交结果待核实', 'waiting'], interrupted: ['本轮已中断', 'paused'] };
 let managerTimer;
-const desktopRole = (data) => roleByKey('general_manager') || { key: 'desktop_manager', roleTitle: '总经理', name: data.target?.name || '桌面经理', liveState: data.busy ? 'working' : 'idle', appearance: { a: '#c4bbff', b: '#5869dc', emblem: 'briefcase' } };
+const desktopRole = (data) => ({ ...(roleByKey('general_manager') || { key: 'desktop_manager', roleTitle: '总经理', name: data.target?.name || '桌面经理', liveState: data.busy ? 'working' : 'idle', appearance: { a: '#c4bbff', b: '#5869dc', emblem: 'briefcase' } }), modelDisplay: data.modelDisplay || { text: '待确认', source: '桌面运行端未提供逐轮模型记录' } });
 function scheduleManagerReload() {
   if (route().page !== 'manager') return;
   clearTimeout(managerTimer);
@@ -651,7 +653,8 @@ async function pageDashboard(r) {
   const order = { working: 0, waiting_approval: 0, queued: 1, error: 2, paused: 3, delivered: 4, idle: 5 };
   const roles = [...S.roles].sort((a, b) => (order[a.liveState] ?? 9) - (order[b.liveState] ?? 9));
   const today = new Date().toDateString();
-  const doneToday = S.runs.filter((r) => r.status === 'completed' && new Date(r.completedAt).toDateString() === today).length;
+  const doneToday = (S.taskGroups || []).filter(g => g.status === 'completed' && new Date(g.updatedAt).toDateString() === today).length;
+  const activeMatters = (S.taskGroups || []).filter(g => groupMatches(g, 'active')).length;
   const busy = S.roles.filter((r) => ['working', 'waiting_approval', 'queued'].includes(r.liveState)).length;
   const crew = S.setup?.mode === 'personal' ? S.roles : S.roles.filter((r) => r.source === 'company');
   const idleCopy = S.setup?.executionMode === 'desktop' ? '已连接你的 Codex 桌面聊天。' : S.setup?.mode === 'personal' ? (S.roles.length ? '你的 AI 团队已就位。' : '从组建你的 AI 团队开始，') : S.native?.counts.connected ? '当前已连接岗位没有执行活动，' : '等待桌面岗位连接，';
@@ -659,7 +662,7 @@ async function pageDashboard(r) {
       <div class="hero-side"><div class="hero-crew">${crew.map((r) => `<a href="#/role/${encodeURIComponent(r.key)}" title="${esc(`${r.roleTitle}｜${r.name}`)}">${roleAvatar(r, { size: 52, emblem: false })}</a>`).join('')}</div><div class="page-actions" style="justify-content:flex-end;margin-top:14px"><a class="btn" href="#/office">${icon(ICONS.office, 15)}进入办公室</a><a class="btn btn-primary" href="#/manager">联系总经理</a></div></div></section>
     ${pending.length ? `<section class="attention"><div class="attention-head">${status(['需要你处理', 'waiting'])}<span>${pending.length} 项审批正在等待决定</span><a class="btn btn-sm" href="#/approvals">全部审批</a></div>${pending.slice(0, 2).map(approvalCard).join('')}</section>` : ''}
     <section class="metrics dashboard-metrics">
-      ${metric('执行中', c.active ?? 0, 'running', '#/team', S.setup?.mode === 'personal' ? '查看团队进度' : `桌面 ${S.native?.counts.active || 0} · 独立运行 ${live.length}`)}${metric('待审批', c.waitingApproval ?? 0, 'waiting', '#/approvals', '审批决定直接回到任务')}${metric('今日完成', doneToday, 'done', '#/tasks?status=completed', `累计 ${c.completed ?? 0}`)}${metric('团队岗位', S.roles.length, 'neutral', '#/roles', '查看职责与配置')}
+      ${metric('进行中', activeMatters, 'running', '#/team', S.setup?.mode === 'personal' ? '查看团队进度' : `桌面 ${S.native?.counts.active || 0} · 独立运行 ${live.length}`)}${metric('待审批', c.waitingApproval ?? 0, 'waiting', '#/approvals', '审批决定直接回到任务')}${metric('今日完成', doneToday, 'done', '#/tasks?status=completed', `累计 ${(S.taskGroups || []).filter(g => g.status === 'completed').length} 件`)}${metric('团队岗位', S.roles.length, 'neutral', '#/roles', '查看职责与配置')}
     </section>
     ${S.setup?.nativeCompanyEnabled && S.native ? nativeDashboardHtml(S.native, S.roles) : ''}
     <div class="grid-main">
@@ -669,7 +672,7 @@ async function pageDashboard(r) {
         ${handoffs.length ? card('最近交接', `<div class="mini-list stagger">${handoffs.map((e) => { const f = roleByKey(e.fromRole) || { name: e.fromName, roleTitle: e.fromName }; const t = roleByKey(e.toRole) || { name: e.toName, roleTitle: e.toName }; return `<div class="mini-row handoff-row">${roleAvatar(f, { size: 20 })}${roleLabel(f, { project: false, size: 'sm' })}<span class="handoff-connection kind-${e.kind === 'dispatch' ? 'dispatch' : e.kind === 'report' ? 'report' : 'other'}"><i class="connection-line" aria-hidden="true"></i>${esc(KIND_LABEL[e.kind] || e.kind)}</span>${roleLabel(t, { project: false, size: 'sm' })}<span class="spacer"></span><span class="muted small nowrap">${timeAgo(e.at)}</span></div>`; }).join('')}</div>`, { actions: '<a href="#/handoffs" class="link">查看交接链路</a>' }) : ''}
       </div>
     </div>
-    ${card('最近任务', taskList(S.runs.slice(0, 6)), { actions: '<a href="#/tasks" class="link">全部任务</a>', cls: 'flush' })}`;
+    ${card('最近任务', groupList((S.taskGroups || []).slice(0, 6)), { actions: '<a href="#/tasks" class="link">全部任务</a>', cls: 'flush' })}`;
 }
 
 async function pageApprovals() {
@@ -680,14 +683,35 @@ async function pageApprovals() {
     ${done.length ? card('已处理', `<div class="tlist simple">${done.map((a) => `<a class="srow" href="#/task/${a.runId}">${roleChip(roleByKey(a.roleKey), { project: false })}<span class="ellipsis mono small">${esc(String(a.command || a.kind).replace(/^\/bin\/zsh -lc /, ''))}</span>${status(approvalStatus(a.status))}<span class="muted small nowrap">${timeAgo(a.decidedAt || a.createdAt)}</span></a>`).join('')}</div>`, { cls: 'flush' }) : ''}`;
 }
 
+function groupMatches(g, filter) {
+  return filter === 'all' || (filter === 'active' ? ['starting', 'running', 'queued', 'waiting_approval', 'delivered', 'blocked'].includes(g.status) : filter === 'interrupted' ? ['interrupted', 'cancelled'].includes(g.status) : g.status === filter);
+}
+function groupList(groups) {
+  if (!groups.length) return empty('这个分类下没有事项', '换一个分类，或把目标交给经理。');
+  return `<div class="matter-list">${groups.map(g => {
+    const title = g.root ? taskTitle(g.root) : g.tasks[0]?.title || taskTitle(g.runs[0] || {});
+    const [label, tone] = g.label ? [g.label, g.tone] : runStatus(g);
+    const href = g.root?.id || g.runs[0]?.id;
+    const saved = readMatterState();
+    return `<details class="matter" data-matter="${esc(g.id)}" ${saved.includes(g.id) ? 'open' : ''}><summary><span class="matter-toggle" aria-hidden="true">+</span><span class="matter-goal"><strong>${esc(title)}</strong><small>${g.tasks.length} 个子任务 · ${g.runs.length} 次执行${g.sharedProcess ? ' · 含共享处理回合' : ''}</small></span><span class="matter-owner">${roleChip(roleByKey(g.ownerRoleKey), { project: false })}</span>${status([label, tone])}<time class="muted small">${timeAgo(g.createdAt)}</time></summary><div class="matter-content"><div class="matter-heading"><strong>目标与总负责人</strong>${href ? `<a class="link" href="#/task/${esc(href)}?matter=${encodeURIComponent(g.id)}">打开原始需求</a>` : ''}</div><p class="small muted">${esc(g.id)} · ${g.participants.map(k => esc(roleByKey(k)?.roleTitle || k)).join('、')}</p>
+      ${g.tasks.length ? `<h3>子任务</h3><div class="matter-children">${g.tasks.map(t => `<article class="matter-child"><div><strong>${esc(t.title)}</strong><p class="small muted">${esc(t.id)} · ${esc(roleByKey(t.employeeRoleKey)?.roleTitle || t.employeeRoleKey)}</p></div>${status(TEAM_STATE[t.status] || [t.status, 'neutral'])}${t.runIds?.length ? `<a class="link small" href="#/task/${esc(t.runIds.at(-1))}?matter=${encodeURIComponent(g.id)}">执行详情</a>` : ''}</article>`).join('')}</div>` : ''}
+      <details class="matter-process"><summary>执行与沟通 · ${g.runs.length + g.messages.length} 条记录</summary><div class="matter-records">${g.runs.map(run => `<a href="#/task/${esc(run.id)}?matter=${encodeURIComponent(g.id)}"><span class="chip">${run.kind === 'inbox' ? '处理回报' : run.teamTaskId ? '子任务执行' : '目标执行'}</span><span class="matter-record-title">${esc(taskTitle(run))}<small>${esc(run.id)}</small></span>${status(runStatus(run))}</a>`).join('')}${g.messages.map(m => `<article><span class="chip">${esc(MSG_LABEL[m.kind] || m.kind)}</span><span class="matter-record-title" title="${esc(m.summary || '')}">${esc(m.summary || '')}<small>${esc(m.id)}</small></span>${m.runId || m.managerRunId ? `<a class="link small" href="#/task/${esc(m.runId || m.managerRunId)}?matter=${encodeURIComponent(g.id)}">查看记录</a>` : ''}</article>`).join('')}</div></details></div></details>`;
+  }).join('')}</div>`;
+}
+function matterStateKey() { return `company.matters:${S.setup?.manager?.key || S.setup?.name || 'local'}`; }
+function readMatterState() { try { return JSON.parse(sessionStorage.getItem(matterStateKey()) || '[]'); } catch { return []; } }
+view.addEventListener('toggle', event => {
+  if (!event.target.matches?.('[data-matter]')) return;
+  const ids = new Set(readMatterState()), id = event.target.dataset.matter;
+  event.target.open ? ids.add(id) : ids.delete(id);
+  try { sessionStorage.setItem(matterStateKey(), JSON.stringify([...ids])); } catch {}
+}, true);
 async function pageTasks(r) {
-  const filter = r.query.get('status') || 'all';
-  const match = (x) => filter === 'all' || (filter === 'active' ? ACTIVE.has(x.status) || x.status === 'queued' : filter === 'interrupted' ? ['interrupted', 'cancelled'].includes(x.status) : x.status === filter);
-  const tabs = [['all', '全部'], ['active', '进行中'], ['completed', '已完成'], ['interrupted', '已暂停/停止'], ['failed', '失败']];
-  const counts = Object.fromEntries(tabs.map(([k]) => [k, S.runs.filter((x) => k === 'all' || (k === 'active' ? ACTIVE.has(x.status) || x.status === 'queued' : k === 'interrupted' ? ['interrupted', 'cancelled'].includes(x.status) : x.status === k)).length]));
-  view.innerHTML = `${pageHead('任务', '交代目标，查看进度和结果。', `<a class="btn btn-primary" href="#/manager">${icon(ICONS.plus, 15)}交代任务</a>`)}
-    <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<a role="tab" aria-selected="${filter === k}" class="tab ${filter === k ? 'active' : ''}" href="#/tasks?status=${k}">${l}<span class="tab-count">${counts[k]}</span></a>`).join('')}</div>
-    ${card('', taskList(S.runs.filter(match), empty('这个分类下没有任务', '换一个分类，或交代任务。')), { cls: 'flush' })}`;
+  const filter = r.query.get('status') || 'all', groups = S.taskGroups || [];
+  const tabs = [['all', '全部'], ['active', '进行中'], ['waiting_approval', '待决定'], ['blocked', '有阻碍'], ['completed', '已完成'], ['interrupted', '已暂停/停止'], ['failed', '失败']];
+  view.innerHTML = `${pageHead('任务', '一件事，一行看清。展开查看子任务和过程。', `<a class="btn btn-primary" href="#/manager">${icon(ICONS.plus, 15)}交代任务</a>`)}
+    <div class="tabs matter-tabs" role="tablist">${tabs.map(([k, l]) => `<a role="tab" aria-selected="${filter === k}" class="tab ${filter === k ? 'active' : ''}" href="#/tasks?status=${k}">${l}<span class="tab-count">${groups.filter(g => groupMatches(g, k)).length}</span></a>`).join('')}</div>
+    ${card('', groupList(groups.filter(g => groupMatches(g, filter))), { cls: 'flush' })}`;
 }
 
 const TEAM_STATE = { submitted: ['已提交', 'queued'], running: ['执行中', 'running'], delivered: ['已交付', 'done'], accepted: ['已验收', 'done'], blocked: ['有阻碍', 'error'], needs_decision: ['需决定', 'waiting'], paused: ['已暂停', 'paused'], cancelled: ['已取消', 'neutral'], interrupted: ['待恢复', 'paused'] };
@@ -745,7 +769,7 @@ async function pageTeam(r, { quiet = false } = {}) {
     ${data.nextCursor ? `<a class="btn btn-sm" href="#/team?namespace=${encodeURIComponent(selected)}&cursor=${encodeURIComponent(data.nextCursor)}">下一页任务</a>` : ''}<div class="team-capabilities"><span class="chip">${S.setup?.mode === 'personal' ? '团队工作区' : '测试工作区'}</span><span class="chip">内部派单与回报</span><span class="chip">最多 3 名员工并发</span><span class="chip">同项目串行写入</span><a class="link" href="#/system">查看连接与能力</a></div>`}`;
 }
 
-async function pageChat(r) {
+async function pageChat(r, { quiet = false } = {}) {
   const data = await api('GET', `/api/sessions/${encodeURIComponent(r.id)}/chat`);
   if (!isCurrentRoute(r)) return;
   const { session, runs } = data;
@@ -753,9 +777,28 @@ async function pageChat(r) {
   const active = runs.find((run) => ACTIVE.has(run.status));
   const isEmployee = session.collaboration?.authority === 'employee';
   const controls = active ? `<button class="btn btn-sm" data-action="interrupt" data-run="${active.id}" data-mode="pause">暂停</button><button class="btn btn-sm btn-danger-ghost" data-action="interrupt" data-run="${active.id}" data-mode="stop">停止</button>` : '';
-  const feed = runs.map((run) => `<section class="chat-turn" data-run-id="${run.id}"><div class="chat-turn-meta">${status(runStatus(run))}<span>${run.kind === 'inbox' ? '收件箱事件唤醒' : run.kind === 'team' ? '总经理派单' : '本人指令'} · ${clock(run.createdAt)}</span><a class="link" href="#/task/${run.id}">执行详情</a>${run.usage?.totalTokens ? `<span>${num(run.usage.totalTokens)} token</span>` : ''}</div>${(run.items.length ? run.items : [{ type: 'userMessage', id: run.id, text: run.prompt }]).map((item) => entryHtml(item, role, run.nativeOrigin, run.dispatcher)).join('')}${run.live ? [...Object.entries(run.live.messages || {})].map(([key, content]) => `<div class="entry entry-agent"><div class="entry-avatar">${roleAvatar(role, { size: 28, state: 'working' })}</div><div class="entry-body">${md(content)}</div></div>`).join('') : ''}${run.error ? `<div class="notice">${esc(run.error.message)}</div>` : ''}</section>`).join('');
-  const composer = isEmployee ? `<div class="notice">由总经理安排任务，完成后主动汇报。<a class="link" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">查看团队任务</a></div>` : active || runs.some((run) => run.status === 'queued') ? `<div class="chat-running">${roleAvatar(role, { size: 26, state: 'working' })}<span>正在处理本轮任务</span>${controls}</div>` : `<form class="composer composer-tall chat-composer" data-form="chat" data-session="${session.id}" data-stable><label class="sr-only" for="chat-prompt">交给${esc(role.roleTitle)}的任务</label><textarea id="chat-prompt" name="prompt" rows="3" required placeholder="写下目标、范围和交付要求…"></textarea><button class="btn btn-primary" type="submit">交给${esc(role.roleTitle)}</button></form>`;
-  view.innerHTML = `<header class="chat-head"><div>${roleAvatar(role, { size: 48 })}<div>${roleLabel(role, { size: 'lg' })}<p class="muted small">${esc(S.setup?.mode === 'personal' ? S.setup.name : session.collaboration?.namespace || '独立岗位')} · 固定对话</p></div></div><div class="page-actions"><a class="btn btn-sm" href="#/role/${encodeURIComponent(role.key)}">岗位配置</a>${session.collaboration ? `<a class="btn btn-sm" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">团队与收件箱</a>` : ''}${controls}</div></header><div class="chat-layout"><section class="feed chat-feed">${feed || empty('开始第一项任务', isEmployee ? '等待同组总经理派单。' : '交代目标，经理会安排员工执行。')}${composer}</section><aside class="stack">${card('协作能力', `<div class="chips">${(session.toolNames || []).map((name) => `<span class="chip">${esc({ yewang_team: '团队信息', yewang_dispatch: '真实派单', yewang_report: '主动回报', yewang_inbox: '收件箱', yewang_review: '验收', yewang_task_control: '停止续办', yewang_collaborate: '任务内协作' }[name] || name)}</span>`).join('')}</div><p class="muted small">Skill：${esc(role.skills.map((s) => s.name).join('、') || '未选择')}</p>`)}</aside></div>`;
+  const feed = runs.map((run) => `<section class="chat-turn" data-run-id="${run.id}"><div class="chat-turn-meta">${status(runStatus(run))}<span>${run.kind === 'inbox' ? '收件箱事件唤醒' : run.kind === 'team' ? '总经理派单' : '本人指令'} · ${clock(run.createdAt)}</span><a class="link" href="#/task/${run.id}">执行详情</a>${run.usage?.totalTokens ? `<span>${num(run.usage.totalTokens)} token</span>` : ''}</div>${(run.items.length ? run.items : [{ type: 'userMessage', id: run.id, text: run.prompt }]).map((item) => entryHtml(item, { ...role, modelDisplay: actualRoleModel(role, [run]) }, run.nativeOrigin, run.dispatcher)).join('')}${run.live ? [...Object.entries(run.live.messages || {})].map(([key, content]) => `<div class="entry entry-agent"><div class="entry-avatar">${roleAvatar(role, { size: 28, state: 'working' })}</div><div class="entry-body">${md(content)}</div></div>`).join('') : ''}${run.error ? `<div class="notice">${esc(run.error.message)}</div>` : ''}</section>`).join('');
+  const oldFeed = quiet && view.querySelector('.chat-feed');
+  if (oldFeed && view.querySelector('[data-form="chat"] textarea')) {
+    const nearBottom = oldFeed.scrollHeight - oldFeed.scrollTop - oldFeed.clientHeight < 100;
+    const previousScroll = oldFeed.scrollTop;
+    oldFeed.innerHTML = feed || empty('开始第一项任务', '交代目标，经理会安排员工执行。');
+    oldFeed.scrollTop = nearBottom ? oldFeed.scrollHeight : previousScroll;
+    const submit = view.querySelector('[data-form="chat"] button[type="submit"]');
+    if (submit) submit.disabled = Boolean(active || runs.some(run => run.status === 'queued'));
+    const activity = view.querySelector('.chat-activity');
+    if (activity) activity.innerHTML = active ? `<div class="chat-running">${roleAvatar(role, { size: 26, state: 'working' })}<span>正在处理本轮任务</span>${controls}</div>` : '';
+    const topControls = view.querySelector('[data-chat-controls]');
+    if (topControls) topControls.innerHTML = controls;
+    const model = view.querySelector('.chat-head .rl-model');
+    if (model && role.modelDisplay) { model.textContent = role.modelDisplay.text; model.title = role.modelDisplay.source; }
+    return;
+  }
+  const busy = active || runs.some(run => run.status === 'queued');
+  const activity = `<div class="chat-activity">${active ? `<div class="chat-running">${roleAvatar(role, { size: 26, state: 'working' })}<span>正在处理本轮任务</span>${controls}</div>` : ''}</div>`;
+  const composer = isEmployee ? `<div class="notice">由总经理安排任务，完成后主动汇报。<a class="link" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">查看团队任务</a></div>` : `${activity}<form class="composer composer-tall chat-composer" data-form="chat" data-session="${session.id}" data-stable><label class="sr-only" for="chat-prompt">交给${esc(role.roleTitle)}的任务</label><textarea id="chat-prompt" name="prompt" rows="3" required placeholder="${busy ? '本轮进行中，可以先写下一条，结束后再发送…' : '写下目标、范围和交付要求…'}"></textarea><button class="btn btn-primary" type="submit" ${busy ? 'disabled' : ''}>交给${esc(role.roleTitle)}</button></form>`;
+
+  view.innerHTML = `<header class="chat-head"><div>${roleAvatar(role, { size: 48 })}<div>${roleLabel(role, { size: 'lg' })}<p class="muted small">${esc(S.setup?.mode === 'personal' ? S.setup.name : session.collaboration?.namespace || '独立岗位')} · 固定对话</p></div></div><div class="page-actions"><a class="btn btn-sm" href="#/role/${encodeURIComponent(role.key)}">岗位配置</a>${session.collaboration ? `<a class="btn btn-sm" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">团队与收件箱</a>` : ''}<span class="chat-controls" data-chat-controls>${controls}</span></div></header><div class="chat-layout"><div class="chat-column"><section class="feed chat-feed">${feed || empty('开始第一项任务', isEmployee ? '等待同组总经理派单。' : '交代目标，经理会安排员工执行。')}</section>${composer}</div><aside class="stack">${card('协作能力', `<div class="chips">${(session.toolNames || []).map((name) => `<span class="chip">${esc({ yewang_team: '团队信息', yewang_dispatch: '真实派单', yewang_report: '主动回报', yewang_inbox: '收件箱', yewang_review: '验收', yewang_task_control: '停止续办', yewang_collaborate: '任务内协作' }[name] || name)}</span>`).join('')}</div><p class="muted small">Skill：${esc(role.skills.map((s) => s.name).join('、') || '未选择')}</p>`)}</aside></div>`;
 }
 
 async function pageTask(r) {
@@ -800,7 +843,8 @@ function markFresh(id, html) {
 }
 
 function taskDetailHtml(run) {
-  const role = roleByKey(run.roleKey);
+  const baseRole = roleByKey(run.roleKey);
+  const role = baseRole ? { ...baseRole, modelDisplay: actualRoleModel(baseRole, [run]) } : baseRole;
   const session = sessionById(run.sessionId);
   const active = ACTIVE.has(run.status);
   const formal = Boolean(run.nativeOrigin);
@@ -827,7 +871,7 @@ function taskDetailHtml(run) {
     ? run.skills.map((s) => { const echoed = run.skillEvidence?.injected?.some((i) => i.path === s.path); return `<li><span class="skill-name">${esc(s.name)}</span>${echoed ? status(['本轮已接收', 'done']) : active ? status(['等待回显', 'queued']) : status(['未见回显', 'waiting'])}<span class="mono small muted">sha256 ${esc((s.sha256 || '').slice(0, 12))}</span></li>`; }).join('')
     : '<li class="muted small">本轮未选择 Skill</li>';
   return `<header class="task-head ${active ? 'is-live' : ''}">
-      <div class="task-titles"><h1 class="task-title">${esc(taskTitle(run))}</h1><div class="task-meta">${status([label, tone], run.status === 'interrupted' && run.stopMode ? STOP_MODE[run.stopMode] : '')}${roleChip(role, { avatar: 20 })}<span class="muted small">${run.kind === 'continue' ? '继续' : '派单'} · ${timeAgo(run.createdAt)}</span></div></div>
+      <div class="task-titles"><a class="link small" href="#/tasks">返回事项列表</a><h1 class="task-title">${esc(taskTitle(run))}</h1><div class="task-meta">${status([label, tone], run.status === 'interrupted' && run.stopMode ? STOP_MODE[run.stopMode] : '')}${roleChip(role, { avatar: 20 })}<span class="muted small">${run.kind === 'continue' ? '继续' : '派单'} · ${timeAgo(run.createdAt)}</span></div></div>
       <div class="page-actions">${actions}</div>
     </header>
     <div class="task-layout">
@@ -852,7 +896,7 @@ function taskDetailHtml(run) {
           <dt>Codex 会话</dt><dd>${mono(run.threadId ? `${run.threadId.slice(0, 13)}…` : '—', run.threadId)}</dd>
           <dt>本轮 ID</dt><dd>${mono(run.turnId ? `${run.turnId.slice(0, 13)}…` : '—', run.turnId)}</dd>
           <dt>工作目录</dt><dd>${mono(session ? `…/${session.cwd.split('/').slice(-2).join('/')}` : '—', session?.cwd)}</dd>
-          <dt>模型</dt><dd>${esc(run.model || session?.model || '默认')} · ${esc(run.effort || '')}</dd>
+          <dt>模型</dt><dd><span title="${esc(role?.modelDisplay?.source)}">${esc(role?.modelDisplay?.text || '待确认')}</span> · ${esc(run.effort || '')}</dd>
           <dt>权限</dt><dd>${esc(session?.sandbox || '—')} · 审批 ${esc(session?.approvalPolicy || '—')}</dd>
           <dt>开始</dt><dd>${mono(clock(run.startedAt || run.createdAt))}</dd>
           <dt>用时</dt><dd>${mono(run.durationMs != null ? duration(run.durationMs) : active ? '进行中' : '—')}</dd>
@@ -1637,10 +1681,19 @@ view.addEventListener('submit', async (event) => {
   }
 });
 
+document.getElementById('main')?.addEventListener('scroll', () => {
+  if (route().page !== 'tasks') return;
+  try { sessionStorage.setItem(matterStateKey() + ':scroll', String(document.getElementById('main').scrollTop)); } catch {}
+});
+function restoreMatterPosition() {
+  if (route().page !== 'tasks') return;
+  try { document.getElementById('main')?.scrollTo(0, Number(sessionStorage.getItem(matterStateKey() + ':scroll')) || 0); } catch {}
+}
 window.addEventListener('hashchange', async () => {
   renderSidebar();
   await renderPage();
-  if (route().page !== 'office') document.getElementById('main')?.scrollTo(0, 0);
+  if (route().page === 'tasks') restoreMatterPosition();
+  else if (route().page !== 'office') document.getElementById('main')?.scrollTo(0, 0);
 });
 
 (async function boot() {
@@ -1651,6 +1704,7 @@ window.addEventListener('hashchange', async () => {
   }
   renderSidebar();
   await renderPage();
+  restoreMatterPosition();
   connectEvents(onEvent, (state) => {
     S.sse = state;
     renderRuntime();

@@ -160,7 +160,7 @@ export function roleLabel(role, { project = true, size = 'md' } = {}) {
   if (role.key === 'console') return `<span class="rl rl-${size}"><span class="rl-title">控制台</span></span>`;
   const title = role.roleTitle || String(role.title || '').split('｜')[0] || role.name;
   const full = `${title}｜${role.name}${role.project ? ` · ${role.project}` : ''}`;
-  return `<span class="rl rl-${size}" title="${esc(full)}"><span class="rl-title">${esc(title)}</span><span class="rl-sep">｜</span><span class="rl-name">${esc(role.name)}</span>${project && role.project ? `<span class="rl-proj">${esc(role.project)}</span>` : ''}</span>`;
+  return `<span class="rl rl-${size}" title="${esc(full)}"><span class="rl-title">${esc(title)}</span>${role.modelDisplay ? `<span class="rl-model" title="${esc(role.modelDisplay.source)}">${esc(role.modelDisplay.text)}</span>` : ''}<span class="rl-sep">｜</span><span class="rl-name">${esc(role.name)}</span>${project && role.project ? `<span class="rl-proj">${esc(role.project)}</span>` : ''}</span>`;
 }
 
 export const CONSOLE_ROLE = { key: 'console', name: '控制台', roleTitle: '控制台' };

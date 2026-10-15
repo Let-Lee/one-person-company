@@ -131,7 +131,7 @@ test('every console page renders real API data without script errors', async () 
   const pages = [
     ['#/', /岗位动态/],
     ['#/approvals', /批准一次/],
-    ['#/runs', /负责岗位/],
+    ['#/runs', /总负责人/],
     [`#/run/${done.id}`, /结果回传/],
     [`#/run/${approval.id}`, /拒绝并中断/],
     ['#/sessions', /UI 测试会话/],

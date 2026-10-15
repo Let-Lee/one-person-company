@@ -231,3 +231,13 @@ test('a disconnected desktop during initial follow fails immediately instead of 
     assert.equal(result.ready, false); assert.equal(result.lastError, '桌面消息超过上限');
   } finally { f.cleanup(); }
 });
+
+test('desktop model label follows exact active turn metadata and never a global default', async () => {
+ const f=fixture();try {
+  f.client.state.model='global-default';await f.link.readStatus();assert.equal(f.link.snapshot().modelDisplay.text,'待确认');
+  f.client.state.turns=[{turnId:'old',status:'completed',params:{model:'old-model'}}];f.client.revision++;f.client.emitState();assert.equal(f.link.snapshot().modelDisplay.text,'上次 · old-model');
+  f.client.state.turns.push({turnId:'active',status:'inProgress',params:{}});f.client.revision++;f.client.emitState();assert.equal(f.link.snapshot().modelDisplay.text,'待确认');
+  f.client.state.turns[1].params.model='current-model';f.client.revision++;f.client.emitState();assert.equal(f.link.snapshot().modelDisplay.text,'current-model');assert.match(f.link.snapshot().modelDisplay.source,/active/);
+  assert.equal(f.client.calls.filter(c=>c.method==='thread-follower-start-turn').length,0);
+ }finally{f.cleanup()}
+});
