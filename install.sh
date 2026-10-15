@@ -4,6 +4,18 @@ if [ "$(uname -s)" != Darwin ]; then
   printf '%s\n' '一键安装目前仅支持 macOS。其他平台尚未验证。' >&2
   exit 1
 fi
+# Match an already enabled macOS HTTPS proxy when the terminal has no proxy.
+# This changes only this installer process, never the user's system settings.
+if [ -z "${HTTPS_PROXY:-${https_proxy:-${ALL_PROXY:-${all_proxy:-}}}}" ]; then
+  company_proxy_settings="$(/usr/sbin/scutil --proxy)"
+  company_proxy_enabled="$(printf '%s\n' "$company_proxy_settings" | awk '$1 == "HTTPSEnable" { print $3; exit }')"
+  company_proxy_host="$(printf '%s\n' "$company_proxy_settings" | awk '$1 == "HTTPSProxy" { print $3; exit }')"
+  company_proxy_port="$(printf '%s\n' "$company_proxy_settings" | awk '$1 == "HTTPSPort" { print $3; exit }')"
+  if [ "$company_proxy_enabled" = 1 ] && [ -n "$company_proxy_host" ] && [ -n "$company_proxy_port" ]; then
+    case "$company_proxy_host" in *:*) company_proxy_host="[$company_proxy_host]";; esac
+    export https_proxy="http://$company_proxy_host:$company_proxy_port"
+  fi
+fi
 company_node=''
 for candidate in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node /opt/homebrew/opt/node@24/bin/node /usr/local/opt/node@24/bin/node; do
   [ -n "$candidate" ] && [ -x "$candidate" ] || continue
@@ -21,11 +33,11 @@ if [ -e "$company_home" ] && [ ! -f "$company_home/.one-person-company" ] && [ -
   printf '%s\n' '目标目录已有其他内容，请用 ONE_PERSON_COMPANY_HOME 选择一个空目录。' >&2
   exit 1
 fi
-company_temp="$(mktemp -d)"
+company_temp="$(mktemp -d "${TMPDIR:-/tmp}/one-person-company.XXXXXX")"
 trap 'rm -rf "$company_temp"' EXIT
 archive_url="${ONE_PERSON_COMPANY_ARCHIVE:-https://github.com/Let-Lee/one-person-company/archive/refs/heads/main.zip}"
 printf '%s\n' '正在下载公司源码…'
-curl --fail --location --silent --show-error "$archive_url" -o "$company_temp/source.zip"
+curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 --retry 1 "$archive_url" -o "$company_temp/source.zip"
 unzip -q "$company_temp/source.zip" -d "$company_temp/source"
 company_source=''
 for candidate in "$company_temp/source"/*; do if [ -d "$candidate" ]; then company_source="$candidate"; break; fi; done

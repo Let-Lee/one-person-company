@@ -15,8 +15,10 @@ brew install node@24
 在终端运行一键安装：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Let-Lee/one-person-company/main/install.sh | bash
+curl -fsSL --connect-timeout 10 --max-time 60 https://raw.githubusercontent.com/Let-Lee/one-person-company/main/install.sh | bash
 ```
+
+安装脚本会使用已有的终端代理；终端未配置时会读取 macOS 已启用的 HTTPS 代理，只用于本次下载，不修改系统设置。下载遇到网络错误时会明确报错，可检查网络后重试。
 
 它会下载本项目、安装到 `~/Applications/OnePersonCompany` 并打开本机页面。以后双击该目录的 **启动公司.command**；结束时双击 **停止公司.command**。更新可重新运行安装命令，数据单独保存在 `data/` 中。
 
