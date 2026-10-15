@@ -23,7 +23,7 @@ try {
   $companyNode = $null
   foreach ($candidate in $companyNodes) {
     if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-      & $candidate -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+      & $candidate -e 'process.exit(Number.parseInt(process.versions.node,10)>=20?0:1)'
       if ($LASTEXITCODE -eq 0) { $companyNode = $candidate; break }
     }
   }

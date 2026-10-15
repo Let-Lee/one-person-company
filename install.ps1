@@ -29,7 +29,7 @@ try {
   $companyNode = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
   if (-not $companyNode -and $env:ProgramFiles) { $companyNode = Join-Path $env:ProgramFiles 'nodejs/node.exe' }
   if (-not $companyNode -or -not (Test-Path -LiteralPath $companyNode -PathType Leaf)) { throw '请先安装 Node.js 20 或以上，再重新运行安装器。' }
-  & $companyNode -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+  & $companyNode -e 'process.exit(Number.parseInt(process.versions.node,10)>=20?0:1)'
   if ($LASTEXITCODE -ne 0) { throw '需要 Node.js 20 或以上。' }
   $companyTemp = Join-Path ([IO.Path]::GetTempPath()) ('one-person-company-' + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $companyTemp | Out-Null
