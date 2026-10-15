@@ -133,7 +133,14 @@ export class Onboarding {
     this.setup.step = 'employees'; this.save(); return this.snapshot();
   }
 
-  async createEmployee(body) {
+  async addEmployee(body) {
+    check(this.personal && this.setup.completed, '请先完成公司的首次设置', 409);
+    const setup = await this.createEmployee(body, { advance: false });
+    const key = this.setup.employeeRequests[body.requestId].roleKey;
+    return { role: this.wb.getRole(key), sessionCreated: Boolean(this.wb.collaboration.sessionFor(key)), setup };
+  }
+
+  async createEmployee(body, { advance = true } = {}) {
     check(this.personal, '请在现有岗位入口管理员工', 409);
     return this.#lock('employee', async () => {
       const manager = this.wb.getRole(this.setup.managerRoleKey);
@@ -153,7 +160,8 @@ export class Onboarding {
         this.setup.createdRoleKeys.push(role.key); this.save();
       }
       if (!this.wb.collaboration.sessionFor(role.key)) await this.wb.createSession({ roleKey: role.key, title: role.roleTitle + ' · ' + role.name });
-      this.setup.step = 'skills'; this.save(); return this.snapshot();
+      if (advance && !this.setup.completed) this.setup.step = 'skills';
+      this.save(); return this.snapshot();
     });
   }
 

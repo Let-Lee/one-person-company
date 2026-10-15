@@ -219,12 +219,23 @@ export class Workbench extends EventEmitter {
   }
 
   async configureRole(key, body) {
-    this.getRole(key);
+    const existing = this.getRole(key);
+    if (body.profile) {
+      if (existing.source !== 'local') throw new WorkbenchError(400, '该岗位档案由原组织管理');
+      const { name, title, instructions, ...extra } = body.profile;
+      if (Object.keys(extra).length || [name, title, instructions].some((s) => typeof s !== 'string' || !s.trim())) throw new WorkbenchError(400, '请填写岗位、姓名与完整职责');
+      if (name.length > 24 || title.length > 40 || instructions.length > 4000) throw new WorkbenchError(400, '岗位资料过长');
+      if (Object.values(this.state.runs).some((r) => r.roleKey === key && (ACTIVE.has(r.status) || r.status === 'queued'))) throw new WorkbenchError(409, '该岗位正在执行，结束后再修改职责');
+    }
     const config = { ...(this.state.roleConfigs[key] || {}) };
     if (body.skills) config.skills = await this.#validateSkillRefs(body.skills, body.defaults?.cwd || config.defaults?.cwd || this.paths.defaultWorkspace);
     if (body.defaults) config.defaults = this.#cleanDefaults({ ...(config.defaults || {}), ...body.defaults });
     if (body.palette && PALETTES[body.palette]) config.palette = body.palette;
     if (body.emblem && EMBLEMS.includes(body.emblem)) config.emblem = body.emblem;
+    if (body.profile) {
+      const raw = this.state.roles[key], p = body.profile;
+      Object.assign(raw, { name: p.name.trim(), roleTitle: p.title.trim(), title: `${p.title.trim()}｜${p.name.trim()}`, description: p.instructions.trim().slice(0, 400), instructions: p.instructions.trim(), profileVersion: (raw.profileVersion || 0) + 1, updatedAt: now(), ...roleIdentity(key, `${p.title.trim()}｜${p.name.trim()}`, p.name.trim()) });
+    }
     this.state.roleConfigs[key] = config;
     this.store.save();
     this.#emit('roles.updated', {});
@@ -323,6 +334,12 @@ export class Workbench extends EventEmitter {
       .join('\n');
   }
 
+  #roleInstructions(role) {
+    return this.runtime.contextMode === 'lean'
+      ? [`工作台岗位：${role.roleTitle}｜${role.name}（${role.key}）。`, role.description, role.instructions, this.collaboration.instructions(role)].filter(Boolean).join('\n')
+      : [this.#developerInstructions(role), this.collaboration.instructions(role)].filter(Boolean).join('\n');
+  }
+
   async createSession(body) {
     const role = this.getRole(body.roleKey);
     if (role.collaboration && this.creatingSessions.has(role.key)) throw new WorkbenchError(409, '该岗位正在建立稳定会话');
@@ -342,14 +359,9 @@ export class Workbench extends EventEmitter {
       cwd,
       sandbox: settings.sandbox || this.defaults.sandbox,
       approvalPolicy: settings.approvalPolicy || this.defaults.approvalPolicy,
-      developerInstructions: [this.#developerInstructions(role), this.collaboration.instructions(role)].filter(Boolean).join('\n'),
+      developerInstructions: this.#roleInstructions(role),
       serviceName: 'yewang_workbench',
     };
-    if (this.runtime.contextMode === 'lean') {
-      // Preserve the default Codex instructions and permission contract; only the
-      // workbench's repeated role prose is condensed.
-      params.developerInstructions = [`工作台岗位：${role.roleTitle}｜${role.name}（${role.key}）。`, role.description, role.instructions, this.collaboration.instructions(role)].filter(Boolean).join('\n');
-    }
     if (role.collaboration) params.dynamicTools = this.collaboration.tools(role);
     if (settings.model) params.model = settings.model;
     const started = await this.runtime.startThread(params);
@@ -363,6 +375,7 @@ export class Workbench extends EventEmitter {
       toolNames: (params.dynamicTools || []).map((t) => t.name),
       wakePaused: false,
       contextMode: this.runtime.contextMode || 'inherited',
+      roleProfileVersion: role.profileVersion || 0,
       cwd: started.cwd || cwd,
       model: started.model,
       modelProvider: started.modelProvider,
@@ -602,9 +615,13 @@ export class Workbench extends EventEmitter {
       return;
     }
     if (session.source === 'native-migrated') this.migrations.assertActive(session);
-    if (!runtime.isLoaded(session.threadId)) {
+    const currentRole = this.getRole(session.roleKey);
+    const profileChanged = session.source !== 'native-migrated' && (session.roleProfileVersion || 0) !== (currentRole.profileVersion || 0);
+    if (!runtime.isLoaded(session.threadId) || profileChanged) {
       const params = session.source === 'native-migrated' ? {} : { cwd: session.cwd, sandbox: session.sandbox, approvalPolicy: session.approvalPolicy };
+      if (profileChanged) params.developerInstructions = this.#roleInstructions(currentRole);
       const resumed = await runtime.resumeThread(session.threadId, params);
+      session.roleProfileVersion = currentRole.profileVersion || 0;
       run.resumedThread = true;
       session.threadStatus = resumed.thread?.status || null;
     }

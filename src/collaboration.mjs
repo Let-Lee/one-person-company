@@ -484,7 +484,7 @@ export class Collaboration {
   }
 
   handoffs() {
-    return Object.values(this.data.messages).map((m) => ({ id: m.id, channel: 'runner', kind: ['completed', 'blocked', 'decision', 'progress'].includes(m.kind) ? 'report' : m.kind, fromRole: m.fromRole, fromName: this.getRole(m.fromRole).name, toRole: m.toRole, toName: this.getRole(m.toRole).name, at: m.deliveredAt || m.createdAt, taskId: m.taskId, runId: m.runId, messageId: m.id, namespace: m.namespace, status: m.status, sourceThreadId: m.origin?.threadId, sourceTurnId: m.origin?.turnId }));
+    return Object.values(this.data.messages).map((m) => ({ id: m.id, channel: 'runner', kind: ['completed', 'blocked', 'decision', 'progress'].includes(m.kind) ? 'report' : m.kind, reportKind: m.kind, fromRole: m.fromRole, fromName: this.getRole(m.fromRole).name, toRole: m.toRole, toName: this.getRole(m.toRole).name, at: m.deliveredAt || m.createdAt, taskId: m.taskId, runId: m.runId, messageId: m.id, namespace: m.namespace, status: m.status, sourceThreadId: m.origin?.threadId, sourceTurnId: m.origin?.turnId }));
   }
 
   readArtifact(messageId, index) {

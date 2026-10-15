@@ -157,7 +157,7 @@ test('every console page renders real API data without script errors', async () 
   }
   const office = await go('#/office');
   assert.match(office, /class="cap-figure/);
-  assert.match(office, /公司中枢/);
+  assert.match(office, /任务与审批/);
   assert.doesNotMatch(office, /pet-/);
   assert.deepEqual(errors, []);
 });

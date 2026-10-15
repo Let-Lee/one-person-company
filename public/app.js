@@ -6,6 +6,8 @@ import {
 import { drawOfficeLines, nodeCenter, officeHtml, officePanelHtml } from './office.js';
 import { nativeDashboardHtml, nativeRoleTaskHtml, nativeTeamHtml } from './native-team.js';
 import { guideHtml } from './guide.js';
+import { shortTaskTitle, organizationHtml, teamRoleCard, employeeDialogHtml } from './company-ui.js';
+import { draftScope, captureDrafts, restoreDrafts, rememberForm, forgetDraft } from './drafts.js';
 
 const S = { overview: null, roles: [], choices: { palettes: [], emblems: [] }, departments: {}, runs: [], sessions: [], approvals: [], collaboration: { groups: [], tasks: [], messages: [] }, runtime: null, sse: 'connecting', models: null, workspaces: null, run: null, office: { focus: '', range: '48h', edges: [] } };
 const view = document.getElementById('view');
@@ -45,7 +47,7 @@ document.addEventListener('visibilitychange', () => {
 
 const roleByKey = (key) => (key === 'console' ? CONSOLE_ROLE : S.roles.find((r) => r.key === key));
 const sessionById = (id) => S.sessions.find((s) => s.id === id);
-const taskTitle = (run) => (run.prompt.split('\n').find((l) => l.trim()) || run.prompt).trim();
+const taskTitle = (run) => shortTaskTitle(run, S.collaboration);
 const roleActionHref = (role) => role.source === 'company' ? role.key === 'general_manager' ? '#/manager' : `#/team?role=${encodeURIComponent(role.key)}` : role.stableSessionId ? `#/chat/${role.stableSessionId}` : `#/dispatch?role=${encodeURIComponent(role.key)}`;
 
 // ---------------- data ----------------
@@ -60,6 +62,7 @@ async function loadCore() {
   overview.counts.active = runs.runs.filter((r) => ACTIVE.has(r.status)).length + (native.counts.active || 0);
   overview.nativeCollaboration = { ready: native.ready, counts: native.counts };
   Object.assign(S, { overview, native, setup, runtime: overview.runtime, roles: decorated, choices: roles.appearanceChoices, departments: roles.departments, runs: runs.runs, sessions: sessions.sessions, approvals: approvals.approvals, collaboration });
+  draftScope(setup.manager?.key || setup.name);
 }
 
 let refreshTimer = null;
@@ -271,7 +274,7 @@ function updatePageTitle() {
     const role = roleByKey(r.id);
     if (role) leaf = `${role.roleTitle}｜${role.name}`;
   }
-  if (r.page === 'task' && r.id) leaf = r.id;
+  if (r.page === 'task' && r.id) leaf = S.runs.find((run) => run.id === r.id) ? taskTitle(S.runs.find((run) => run.id === r.id)) : '任务详情';
   document.title = `${leaf} · ${S.setup?.name || '一个人的公司'}`;
 }
 
@@ -282,6 +285,7 @@ const skeleton = (rows = 4) => `<div class="skeleton" aria-busy="true" aria-labe
 const errorBox = (message) => `<div class="error-box" role="alert"><strong>页面数据加载失败</strong><p>${esc(message)}</p><button class="btn btn-sm" data-action="retry">${icon(ICONS.refresh, 14)}重试</button></div>`;
 
 async function renderPage({ quiet = false } = {}) {
+  captureDrafts(view);
   const r = route();
   document.body.classList.toggle('guide-mode', r.page === 'guide');
   if (S.setup?.required && !['guide', 'system'].includes(r.page)) { location.hash = '#/guide'; return; }
@@ -300,8 +304,23 @@ async function renderPage({ quiet = false } = {}) {
     view.innerHTML = `${pageHead(PAGE_TITLE[r.page] || '页面')}${errorBox(error.message)}`;
   }
   if (!isCurrentRoute(r)) return;
+  prepareDraftForms();
+  restoreDrafts(view);
   enhance({ animate: !quiet });
 }
+
+function prepareDraftForms() {
+  const drafts = new Set(['new-employee', 'new-role', 'chat', 'dispatch', 'continue', 'steer', 'role-profile', 'role-skills', 'role-defaults', 'role-appearance', 'desktop-manager', 'desktop-connection']);
+  view.querySelectorAll('form[data-form]').forEach((form) => {
+    if (drafts.has(form.dataset.form) && !form.dataset.draftKey) form.dataset.draftKey = [form.dataset.form, form.dataset.role || form.dataset.session || form.dataset.run || ''].join(':');
+  });
+}
+for (const type of ['input', 'change']) view.addEventListener(type, (event) => {
+  const form = event.target.closest('form[data-draft-key]');
+  if (form) { form.dataset.draftDirty = 'true'; rememberForm(form); }
+});
+view.addEventListener('close', (event) => { const form = event.target.querySelector?.('form[data-draft-key]'); if (form?.dataset.draftDirty !== 'saved') rememberForm(form, { open: false }); }, true);
+window.addEventListener('beforeunload', () => captureDrafts(view));
 
 // ---------------- 动效与交互增强 ----------------
 
@@ -377,7 +396,7 @@ view.addEventListener('pointerout', (event) => {
 let palette = null;
 function paletteItems() {
   const items = [];
-  items.push(...[['dispatch', '交代任务', ICONS.plus, 'N'], ...NAV.flatMap((g) => g.items.map(([k, l, d]) => [k, l, d, '']))].map(([k, l, d, hint]) => ({ group: '页面与操作', label: l, icon: d, hint, href: `#/${k}`, keywords: `${l} ${k}` })));
+  items.push(...[['manager', '交代任务', ICONS.plus, 'N'], ...NAV.flatMap((g) => g.items.map(([k, l, d]) => [k, l, d, '']))].map(([k, l, d, hint]) => ({ group: '页面与操作', label: l, icon: d, hint, href: `#/${k}`, keywords: `${l} ${k}` })));
   for (const role of S.roles) {
     items.push({ group: '岗位', label: `${role.roleTitle}｜${role.name}${role.project ? ` · ${role.project}` : ''}`, role, href: `#/role/${encodeURIComponent(role.key)}`, hint: roleStatus(role.liveState)[0], keywords: `${role.roleTitle} ${role.name} ${role.project || ''} ${role.key}` });
     items.push({ group: '派单给岗位', label: `派单给 ${role.roleTitle}｜${role.name}`, role, href: `#/dispatch?role=${encodeURIComponent(role.key)}`, keywords: `派单 ${role.roleTitle} ${role.name}`, hidden: true });
@@ -514,7 +533,7 @@ function taskRow(run) {
   const [label, tone] = runStatus(run);
   return `<a class="trow" href="#/task/${run.id}">
     <span class="trow-status" title="${esc(label)}">${statusIcon16(tone)}</span>
-    <span class="trow-main"><span class="trow-title">${esc(taskTitle(run))}</span><span class="trow-meta">${status([label, tone])}<span class="mono">${esc(run.id.slice(-8))}</span>${session ? `<span class="ellipsis">${esc(session.title)}</span>` : ''}</span></span>
+    <span class="trow-main"><span class="trow-title">${esc(taskTitle(run))}</span><span class="trow-meta">${status([label, tone])}${session ? `<span class="ellipsis">${esc(session.title)}</span>` : ''}</span></span>
     <span class="trow-role">${roleChip(role, { avatar: 22, state: ACTIVE.has(run.status) ? 'working' : 'idle' })}</span>
     <span class="trow-time">${timeAgo(run.createdAt)}</span>
     <span class="trow-num mono">${run.durationMs != null ? duration(run.durationMs) : ACTIVE.has(run.status) ? '进行中' : '—'}</span>
@@ -640,7 +659,7 @@ async function pageDashboard(r) {
     </section>
     ${S.setup?.nativeCompanyEnabled && S.native ? nativeDashboardHtml(S.native, S.roles) : ''}
     <div class="grid-main">
-      ${card('岗位动态', `<div class="agent-list stagger">${roles.map((role) => `<a class="agent-row" href="#/role/${encodeURIComponent(role.key)}">${roleAvatar(role, { size: 38 })}<span class="agent-main">${roleLabel(role)}<span class="agent-task ellipsis">${role.currentNativeTask ? esc(role.currentNativeTask.id + ' · ' + (role.currentNativeTask.progressText || '原生任务')) : role.currentRun ? esc(role.currentRun.prompt) : esc(role.description || '暂无任务')}</span></span>${status(roleStatus(role.liveState))}</a>`).join('')}</div>`, { actions: '<a href="#/office" class="link">在办公室查看</a>' })}
+      ${card('岗位动态', `<div class="agent-list stagger">${roles.map((role) => `<a class="agent-row" href="#/role/${encodeURIComponent(role.key)}">${roleAvatar(role, { size: 38 })}<span class="agent-main">${roleLabel(role)}<span class="agent-task ellipsis">${role.currentNativeTask ? esc(role.currentNativeTask.id + ' · ' + (role.currentNativeTask.progressText || '原生任务')) : role.currentRun ? esc(role.currentRun.prompt) : '暂无任务'}</span></span>${status(roleStatus(role.liveState))}</a>`).join('')}</div>`, { actions: '<a href="#/office" class="link">在办公室查看</a>' })}
       <div class="stack">
         ${card('近 24 小时活动', activityBars(S.runs), { actions: `<span class="muted small mono">${S.runs.filter((x) => Date.now() - Date.parse(x.createdAt) < 86400000).length} 次</span>` })}
         ${handoffs.length ? card('最近交接', `<div class="mini-list stagger">${handoffs.map((e) => { const f = roleByKey(e.fromRole) || { name: e.fromName, roleTitle: e.fromName }; const t = roleByKey(e.toRole) || { name: e.toName, roleTitle: e.toName }; return `<div class="mini-row handoff-row">${roleAvatar(f, { size: 20 })}${roleLabel(f, { project: false, size: 'sm' })}<span class="handoff-connection kind-${e.kind === 'dispatch' ? 'dispatch' : e.kind === 'report' ? 'report' : 'other'}"><i class="connection-line" aria-hidden="true"></i>${esc(KIND_LABEL[e.kind] || e.kind)}</span>${roleLabel(t, { project: false, size: 'sm' })}<span class="spacer"></span><span class="muted small nowrap">${timeAgo(e.at)}</span></div>`; }).join('')}</div>`, { actions: '<a href="#/handoffs" class="link">查看交接链路</a>' }) : ''}
@@ -662,7 +681,7 @@ async function pageTasks(r) {
   const match = (x) => filter === 'all' || (filter === 'active' ? ACTIVE.has(x.status) || x.status === 'queued' : filter === 'interrupted' ? ['interrupted', 'cancelled'].includes(x.status) : x.status === filter);
   const tabs = [['all', '全部'], ['active', '进行中'], ['completed', '已完成'], ['interrupted', '已暂停/停止'], ['failed', '失败']];
   const counts = Object.fromEntries(tabs.map(([k]) => [k, S.runs.filter((x) => k === 'all' || (k === 'active' ? ACTIVE.has(x.status) || x.status === 'queued' : k === 'interrupted' ? ['interrupted', 'cancelled'].includes(x.status) : x.status === k)).length]));
-  view.innerHTML = `${pageHead('任务', '交代目标，查看进度和结果。', `<a class="btn btn-primary" href="#/dispatch">${icon(ICONS.plus, 15)}交代任务</a>`)}
+  view.innerHTML = `${pageHead('任务', '交代目标，查看进度和结果。', `<a class="btn btn-primary" href="#/manager">${icon(ICONS.plus, 15)}交代任务</a>`)}
     <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<a role="tab" aria-selected="${filter === k}" class="tab ${filter === k ? 'active' : ''}" href="#/tasks?status=${k}">${l}<span class="tab-count">${counts[k]}</span></a>`).join('')}</div>
     ${card('', taskList(S.runs.filter(match), empty('这个分类下没有任务', '换一个分类，或交代任务。')), { cls: 'flush' })}`;
 }
@@ -732,7 +751,7 @@ async function pageChat(r) {
   const controls = active ? `<button class="btn btn-sm" data-action="interrupt" data-run="${active.id}" data-mode="pause">暂停</button><button class="btn btn-sm btn-danger-ghost" data-action="interrupt" data-run="${active.id}" data-mode="stop">停止</button>` : '';
   const feed = runs.map((run) => `<section class="chat-turn" data-run-id="${run.id}"><div class="chat-turn-meta">${status(runStatus(run))}<span>${run.kind === 'inbox' ? '收件箱事件唤醒' : run.kind === 'team' ? '总经理派单' : '本人指令'} · ${clock(run.createdAt)}</span><a class="link" href="#/task/${run.id}">执行详情</a>${run.usage?.totalTokens ? `<span>${num(run.usage.totalTokens)} token</span>` : ''}</div>${(run.items.length ? run.items : [{ type: 'userMessage', id: run.id, text: run.prompt }]).map((item) => entryHtml(item, role, run.nativeOrigin, run.dispatcher)).join('')}${run.live ? [...Object.entries(run.live.messages || {})].map(([key, content]) => `<div class="entry entry-agent"><div class="entry-avatar">${roleAvatar(role, { size: 28, state: 'working' })}</div><div class="entry-body">${md(content)}</div></div>`).join('') : ''}${run.error ? `<div class="notice">${esc(run.error.message)}</div>` : ''}</section>`).join('');
   const composer = isEmployee ? `<div class="notice">由总经理安排任务，完成后主动汇报。<a class="link" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">查看团队任务</a></div>` : active || runs.some((run) => run.status === 'queued') ? `<div class="chat-running">${roleAvatar(role, { size: 26, state: 'working' })}<span>正在处理本轮任务</span>${controls}</div>` : `<form class="composer composer-tall chat-composer" data-form="chat" data-session="${session.id}" data-stable><label class="sr-only" for="chat-prompt">交给${esc(role.roleTitle)}的任务</label><textarea id="chat-prompt" name="prompt" rows="3" required placeholder="写下目标、范围和交付要求…"></textarea><button class="btn btn-primary" type="submit">交给${esc(role.roleTitle)}</button></form>`;
-  view.innerHTML = `<header class="chat-head"><div>${roleAvatar(role, { size: 48 })}<div>${roleLabel(role, { size: 'lg' })}<p class="muted small">${esc(S.setup?.mode === 'personal' ? S.setup.name : session.collaboration?.namespace || '独立岗位')} · 固定对话</p></div></div><div class="page-actions"><a class="btn btn-sm" href="#/role/${encodeURIComponent(role.key)}">岗位配置</a>${session.collaboration ? `<a class="btn btn-sm" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">团队与收件箱</a>` : ''}${controls}</div></header><div class="chat-layout"><section class="feed chat-feed">${feed || empty('开始第一项任务', isEmployee ? '等待同组总经理派单。' : '交代目标，经理会安排员工执行。')}${composer}</section><aside class="stack">${card('岗位职责', `<p class="small">${esc(role.description || '按本轮任务执行')}</p>${role.instructions && role.instructions !== role.description ? `<details class="detail-note"><summary>完整职责</summary><p>${esc(role.instructions)}</p></details>` : ''}`)}${card('协作能力', `<div class="chips">${(session.toolNames || []).map((name) => `<span class="chip">${esc({ yewang_team: '团队信息', yewang_dispatch: '真实派单', yewang_report: '主动回报', yewang_inbox: '收件箱', yewang_review: '验收', yewang_task_control: '停止续办', yewang_collaborate: '任务内协作' }[name] || name)}</span>`).join('')}</div><p class="muted small">Skill：${esc(role.skills.map((s) => s.name).join('、') || '未选择')}</p>`)}</aside></div>`;
+  view.innerHTML = `<header class="chat-head"><div>${roleAvatar(role, { size: 48 })}<div>${roleLabel(role, { size: 'lg' })}<p class="muted small">${esc(S.setup?.mode === 'personal' ? S.setup.name : session.collaboration?.namespace || '独立岗位')} · 固定对话</p></div></div><div class="page-actions"><a class="btn btn-sm" href="#/role/${encodeURIComponent(role.key)}">岗位配置</a>${session.collaboration ? `<a class="btn btn-sm" href="#/team?namespace=${encodeURIComponent(session.collaboration.namespace)}">团队与收件箱</a>` : ''}${controls}</div></header><div class="chat-layout"><section class="feed chat-feed">${feed || empty('开始第一项任务', isEmployee ? '等待同组总经理派单。' : '交代目标，经理会安排员工执行。')}${composer}</section><aside class="stack">${card('协作能力', `<div class="chips">${(session.toolNames || []).map((name) => `<span class="chip">${esc({ yewang_team: '团队信息', yewang_dispatch: '真实派单', yewang_report: '主动回报', yewang_inbox: '收件箱', yewang_review: '验收', yewang_task_control: '停止续办', yewang_collaborate: '任务内协作' }[name] || name)}</span>`).join('')}</div><p class="muted small">Skill：${esc(role.skills.map((s) => s.name).join('、') || '未选择')}</p>`)}</aside></div>`;
 }
 
 async function pageTask(r) {
@@ -784,7 +803,7 @@ function taskDetailHtml(run) {
   const [label, tone] = runStatus(run);
   const actions = active || run.status === 'queued'
     ? `<button class="btn" data-action="interrupt" data-mode="pause" data-run="${run.id}">${icon(ICONS.pause, 14)}暂停</button><button class="btn btn-danger-ghost" data-action="interrupt" data-mode="stop" data-run="${run.id}">${icon(ICONS.stop, 14)}停止</button>`
-    : formal ? '<a class="btn" href="#/sessions?tab=migration">查看原生接管</a>' : `<a class="btn" href="#/dispatch?session=${run.sessionId}">同会话新派单</a>`;
+    : formal ? '<a class="btn" href="#/sessions?tab=migration">查看原生接管</a>' : `<a class="btn" href="${role?.collaboration?.authority === 'employee' ? '#/manager' : '#/chat/' + run.sessionId}">${role?.collaboration?.authority === 'employee' ? '联系总经理' : '继续对话'}</a>`;
   const live = run.live || { messages: {}, outputs: {}, inflight: [] };
   const inflight = (live.inflight || []).map((item) => entryHtml({ ...item, output: live.outputs?.[item.id] || item.output }, role)).join('');
   const liveMessages = Object.entries(live.messages || {}).map(([itemId, text]) => `<div class="entry entry-agent"><div class="entry-avatar">${roleAvatar(role, { size: 28, state: 'working' })}</div><div class="entry-main"><div class="entry-head">${roleLabel(role, { project: false })}<span class="muted">正在回复</span></div><div class="entry-body live-text" data-live="${esc(itemId)}">${esc(text)}</div></div></div>`).join('');
@@ -820,10 +839,11 @@ function taskDetailHtml(run) {
         ${composer}
       </section>
       <aside class="props-panel">
+        <details class="task-original"><summary>原始需求</summary><pre>${esc(run.prompt || '')}</pre></details>
         <dl class="props">
           <dt>状态</dt><dd>${status([label, tone])}</dd>
           <dt>负责岗位</dt><dd>${roleChip(role, { avatar: 20 })}</dd>
-          <dt>派单方</dt><dd>${esc(run.dispatcher?.label || '控制台')}</dd>
+          <dt>任务编号</dt><dd>${mono(run.id)}</dd>${run.teamTaskId ? `<dt>协作任务</dt><dd>${mono(run.teamTaskId)}</dd>` : ''}<dt>派单方</dt><dd>${esc(run.dispatcher?.label || '控制台')}</dd>
           <dt>会话</dt><dd>${session ? `<a href="#/sessions" class="ellipsis">${esc(session.title)}</a>` : '—'}</dd>
           <dt>Codex 会话</dt><dd>${mono(run.threadId ? `${run.threadId.slice(0, 13)}…` : '—', run.threadId)}</dd>
           <dt>本轮 ID</dt><dd>${mono(run.turnId ? `${run.turnId.slice(0, 13)}…` : '—', run.turnId)}</dd>
@@ -894,14 +914,7 @@ async function pageSessions(r) {
     ${card('', S.sessions.length ? `<div class="table sess-table"><div class="thead"><span>会话</span><span>负责岗位</span><span>状态</span><span>工作目录</span><span class="right">累计 token</span><span>更新</span><span class="right">操作</span></div>${rows}</div>` : empty('还没有员工对话', '交代任务时会自动创建会话。', `<a class="btn btn-primary btn-sm" href="#/dispatch">${icon(ICONS.plus, 14)}交代任务</a>`), { cls: 'flush' })}`;
 }
 
-function roleCard(role) {
-  return `<article class="role-card state-${role.liveState}" style="--a:${role.appearance.a};--b:${role.appearance.b}">
-    <a class="role-card-main" href="#/role/${encodeURIComponent(role.key)}">${roleAvatar(role, { size: 56 })}<span class="role-card-text">${roleLabel(role, { size: 'lg' })}<span class="role-desc">${esc(role.description || 'AI 岗位')}</span></span></a>
-    <div class="role-card-foot">${status(roleStatus(role.liveState))}${role.nativeStatus ? `<span class="muted small ellipsis">原生：${esc(NATIVE_STATUS[role.nativeStatus.status] || role.nativeStatus.status)}</span>` : ''}<span class="spacer"></span><span class="muted small nowrap">${role.sessionCount} 个会话</span></div>
-    ${role.skills.length ? `<div class="chips">${role.skills.map((s) => `<span class="chip chip-skill">${esc(s.name)}</span>`).join('')}</div>` : ''}
-    <div class="role-card-actions"><a class="btn btn-sm btn-primary" href="${roleActionHref(role)}">${role.source === 'company' ? '协作过程' : role.stableSessionId ? '聊天' : '派单'}</a><a class="btn btn-sm" href="#/role/${encodeURIComponent(role.key)}">配置</a></div>
-  </article>`;
-}
+function roleCard(role) { return teamRoleCard(role, roleActionHref(role)); }
 
 function appearanceFields(current = {}) {
   return `<fieldset class="appearance"><legend>岗位形象</legend>
@@ -925,10 +938,8 @@ const PALETTE_FALLBACK = {
 };
 
 async function pageRoles() {
-  const groups = DEPT_ORDER.map((d) => [d, S.roles.filter((r) => (r.dept || 'workbench') === d)]).filter(([, list]) => list.length);
-  view.innerHTML = `${pageHead('岗位', S.setup?.mode === 'personal' ? '按公司需要添加岗位，经理负责安排任务。' : '公司岗位显示当前桌面状态，点击协作过程查看实际任务。独立测试岗位保留原有试点。', `<button class="btn" data-action="new-role">${icon(ICONS.plus, 15)}新增岗位</button>`)}
-    ${groups.map(([d, list]) => `<section class="group"><h2 class="group-title">${esc(S.departments[d] || d)}<span class="muted">${String(list.length).padStart(2, '0')}</span></h2><div class="role-grid stagger">${list.map(roleCard).join('')}</div></section>`).join('')}
-    <dialog id="role-dialog"><form data-form="new-role" class="dialog-form"><h2>新增岗位</h2>
+  const personal = S.setup?.mode === 'personal';
+  const dialog = personal ? employeeDialogHtml(S.setup, appearanceFields({ palette: 'arctic-blue', emblem: 'code' })) : `<dialog id="role-dialog"><form data-form="new-role" class="dialog-form"><h2>新增岗位</h2>
       <div class="form-row"><label class="field"><span>岗位名称</span><input name="title" required maxlength="40" placeholder="例如：测试工程师"></label><label class="field"><span>成员姓名</span><input name="name" required maxlength="24"></label></div>
       <label class="field"><span>岗位说明</span><input name="description" maxlength="400" placeholder="一句话说明负责什么"></label>
       <label class="field"><span>运行指令</span><textarea name="instructions" rows="3" maxlength="4000" placeholder="写给该岗位运行会话的长期工作要求"></textarea></label>
@@ -936,6 +947,9 @@ async function pageRoles() {
       <div class="form-row"><label class="field"><span>协作身份</span><select name="authority"><option value="none">独立岗位</option><option value="manager">测试总经理</option><option value="employee">测试员工</option></select></label><label class="field"><span>所属测试组</span><input name="namespace" maxlength="37" placeholder="test-t004"></label></div>
       <p class="muted small">先创建测试总经理，再添加同组员工。协作岗位自动建立稳定聊天，任务由本组总经理派发。</p>
       <footer class="form-foot"><button class="btn" type="button" data-action="close-dialog">取消</button><span class="spacer"></span><button class="btn btn-primary">保存岗位</button></footer></form></dialog>`;
+  view.innerHTML = `${pageHead('人员与岗位', '经理安排任务，员工按各自职责执行。', `<button class="btn btn-primary" data-action="new-role">${icon(ICONS.plus, 15)}新增岗位</button>`)}
+    <div class="org-summary"><span><b>${S.roles.length}</b> 个岗位</span><span>线路表示已绑定的汇报关系</span><a class="link" href="#/manager">交代任务给经理</a></div>
+    ${organizationHtml(S.roles, S.collaboration.groups, roleCard)}${dialog}`;
 }
 
 async function loadWorkspaces() {
@@ -971,9 +985,10 @@ async function pageRole(r, { quiet = false } = {}) {
   const chosen = new Set(role.skills.map((s) => s.path));
   const runs = S.runs.filter((x) => x.roleKey === role.key).slice(0, 8);
   const sessions = S.sessions.filter((s) => s.roleKey === role.key && !s.archived && !s.detached && s.source !== 'native-migrated');
-  view.innerHTML = `<header class="role-hero" style="--a:${role.appearance.a};--b:${role.appearance.b}">${roleAvatar(role, { size: 88 })}<div class="role-hero-text"><div class="eyebrow">${esc(role.deptLabel || 'Crew')}</div>${roleLabel(role, { size: 'xl' })}<p class="page-sub">${esc(role.description || 'AI 岗位')}</p><div class="role-hero-meta">${status(roleStatus(role.liveState))}<span class="chip">${esc(role.deptLabel || '')}</span><span class="chip">${role.source === 'local' ? 'AI 岗位' : '公司岗位'}</span></div></div><div class="page-actions"><a class="btn btn-primary" href="${roleActionHref(role)}">${icon(ICONS.plus, 15)}${role.source === 'company' ? '协作过程' : role.stableSessionId ? '聊天' : '派单'}</a></div></header>
+  view.innerHTML = `<header class="role-hero" style="--a:${role.appearance.a};--b:${role.appearance.b}">${roleAvatar(role, { size: 88 })}<div class="role-hero-text"><div class="eyebrow">${esc(role.deptLabel || 'Crew')}</div>${roleLabel(role, { size: 'xl' })}<p class="page-sub">职责、技能与运行设置</p><div class="role-hero-meta">${status(roleStatus(role.liveState))}<span class="chip">${esc(role.deptLabel || '')}</span><span class="chip">${role.source === 'local' ? 'AI 岗位' : '公司岗位'}</span></div></div><div class="page-actions"><a class="btn btn-primary" href="${roleActionHref(role)}">${icon(ICONS.plus, 15)}${role.source === 'company' ? '协作过程' : role.stableSessionId ? '聊天' : '派单'}</a></div></header>
     <div class="detail-layout" data-stable>
       <div class="stack">
+        ${card('岗位职责', `<form data-form="role-profile" data-role="${esc(role.key)}"><div class="form-row"><label class="field"><span>岗位名称</span><input name="title" maxlength="40" required value="${esc(role.roleTitle)}"></label><label class="field"><span>成员姓名</span><input name="name" maxlength="24" required value="${esc(role.name)}"></label></div><label class="field"><span>完整职责与长期要求</span><textarea name="instructions" rows="7" maxlength="4000" required>${esc(role.instructions || role.description)}</textarea></label><footer class="form-foot"><span class="muted small">下次执行时生效，沿用原会话。</span><span class="spacer"></span><button class="btn btn-primary btn-sm">保存职责</button></footer></form>`)}
         ${card('岗位技能（Skill）', `<p class="muted small">为岗位选择工作方法，下次执行任务时使用。</p><form data-form="role-skills" data-role="${esc(role.key)}">${skillFilter(skills.skills.length)}<div class="skill-list skill-list-scroll" data-skill-list>${skills.skills.map((s) => `<label class="skill-item ${s.enabled ? '' : 'is-dim'}"><input type="checkbox" name="skill" value="${esc(s.path)}" data-name="${esc(s.name)}" ${chosen.has(s.path) ? 'checked' : ''} ${s.enabled ? '' : 'disabled'}><span><strong>${esc(s.name)}</strong><small>${esc(s.description || '')}</small></span></label>`).join('')}</div><footer class="form-foot"><span class="muted small" data-skill-selection-count>已选 ${chosen.size} 个</span><span class="spacer"></span><button class="btn btn-primary btn-sm">保存 Skill</button></footer></form>`)}
         ${card('默认运行参数', `<form data-form="role-defaults" data-role="${esc(role.key)}"><div class="form-grid">${workspaceSelect(workspaces, role.defaults.cwd)}${modelSelect(models, role.defaults.model)}${effortSelect(role.defaults.effort)}${sandboxSelect(role.defaults.sandbox)}${approvalSelect(role.defaults.approvalPolicy)}</div><footer class="form-foot"><span class="spacer"></span><button class="btn btn-primary btn-sm">保存参数</button></footer></form>`)}
         ${role.source === 'company' ? card('桌面活动', nativeRoleTaskHtml(role)) : ''}
@@ -1060,7 +1075,7 @@ function fitCam() {
   const canvas = floor?.parentElement;
   if (!floor || !canvas) return { x: 0, y: 0, s: 1 };
   const cw = canvas.clientWidth;
-  const ch = canvas.clientHeight - (canvas.clientWidth < 600 ? 54 : 0);
+  const ch = Math.max(120, canvas.clientHeight - 56);
   const fw = floor.offsetWidth;
   const fh = floor.offsetHeight;
   const s = Math.min(1, cw / fw, ch / fh);
@@ -1115,7 +1130,7 @@ function bindCamera(canvas) {
     const r = canvas.getBoundingClientRect();
     const mx = e.clientX - r.left;
     const my = e.clientY - r.top;
-    const next = Math.min(2.2, Math.max(0.6, S.cam.s * (1 - e.deltaY * 0.0018)));
+    const next = Math.min(2.2, Math.max(Math.min(0.3, fitCam().s / 2), S.cam.s * (1 - e.deltaY * 0.0018)));
     S.cam.x = mx - (mx - S.cam.x) * (next / S.cam.s);
     S.cam.y = my - (my - S.cam.y) * (next / S.cam.s);
     S.cam.s = next;
@@ -1133,7 +1148,7 @@ async function pageOffice(r, { quiet = false } = {}) {
   const handoffs = (await api('GET', '/api/handoffs')).handoffs;
   if (!isCurrentRoute(r)) return;
   S.office.handoffs = handoffs;
-  const { html, edges } = officeHtml({ roles: S.roles, runs: S.runs, overview: S.overview, handoffs, focusKey: S.office.focus, range: S.office.range });
+  const { html, edges } = officeHtml({ roles: S.roles, runs: S.runs, overview: S.overview, handoffs, approvals: S.approvals, focusKey: S.office.focus, range: S.office.range });
   S.office.edges = edges;
   const focusRole = S.office.focus ? roleByKey(S.office.focus) : null;
   const rangeTabs = [['24h', '24 小时'], ['48h', '48 小时'], ['7d', '7 天']].map(([k, l]) => `<a class="seg ${S.office.range === k ? 'active' : ''}" href="#/office?range=${k}${S.office.focus ? `&focus=${encodeURIComponent(S.office.focus)}` : ''}">${l}</a>`).join('');
@@ -1167,10 +1182,10 @@ async function pageOffice(r, { quiet = false } = {}) {
   }
   S.office.structure = structure;
   S.office.edgeSignature = edgeSignature;
-  view.innerHTML = `${pageHead('办公室', '线路记录岗位间的真实交接，粗细表示次数。点击工位查看关系与详情，拖动或缩放浏览空间。')}
+  view.innerHTML = `${pageHead('办公室', '看团队当前状态与实际交接。点击工位聚焦，点击状态入口处理任务和审批。')}
     <div class="office-toolbar"><div class="segmented" role="group" aria-label="视图"><button class="seg ${focusRole ? '' : 'active'}" data-action="office-focus" data-role="">${icon(ICONS.overview, 14)}整体浏览</button><button class="seg ${focusRole ? 'active' : ''}" ${focusRole ? '' : 'disabled'}>${icon(ICONS.focus, 14)}${focusRole ? `聚焦：${esc(focusRole.roleTitle)}｜${esc(focusRole.name)}` : '聚焦岗位'}</button></div>${focusRole ? '<span class="spacer"></span>' : `<div class="office-stats">${panel.stats}</div>`}<div class="segmented" role="group" aria-label="时间范围">${rangeTabs}</div></div>
     <div class="office-role-picks" role="group" aria-label="岗位快捷聚焦">${S.roles.map((role) => `<button type="button" class="office-role-pick ${role.key === S.office.focus ? 'active' : ''}" data-action="office-focus" data-role="${esc(role.key)}" aria-pressed="${role.key === S.office.focus}">${roleAvatar(role, { size: 30 })}${roleLabel(role, { size: 'stack', project: false })}</button>`).join('')}</div>
-    <div class="office-layout ${focusRole ? 'has-focus' : ''}"><div class="office-canvas" id="office-canvas">${html}<div class="camera-hud" role="group" aria-label="镜头"><button type="button" data-cam="out" aria-label="缩小">−</button><span id="cam-zoom">100%</span><button type="button" data-cam="in" aria-label="放大">+</button><button type="button" data-cam="fit" aria-label="适配视图">${icon(ICONS.focus, 14)}</button></div><div class="camera-hint">拖动平移 · ⌘ 滚轮缩放</div></div>${focusRole ? `<aside class="office-panel card" aria-live="polite">${panel}</aside>` : ''}</div>${focusRole ? '' : panel.legend}`;
+    <div class="office-layout ${focusRole ? 'has-focus' : ''}"><div class="office-canvas" id="office-canvas">${html}<p class="office-routing-notice" data-routing-notice role="status" hidden></p><div class="camera-hud" role="group" aria-label="镜头"><button type="button" data-cam="out" aria-label="缩小">−</button><span id="cam-zoom">100%</span><button type="button" data-cam="in" aria-label="放大">+</button><button type="button" data-cam="fit" aria-label="适配视图">${icon(ICONS.focus, 14)}</button></div><div class="camera-hint">拖动平移 · ⌘ 滚轮缩放</div></div>${focusRole ? `<aside class="office-panel card" aria-live="polite">${panel}</aside>` : ''}</div>${officePanelHtml({ roles: S.roles, edges, handoffs, overview: S.overview, range: S.office.range }).legend}`;
   const floor = document.getElementById('floor');
   const canvas = document.getElementById('office-canvas');
   const redraw = () => drawOfficeLines(floor, S.office.edges, S.office.focus, { particles: !reduceMotion() });
@@ -1180,7 +1195,7 @@ async function pageOffice(r, { quiet = false } = {}) {
     if (!op) return;
     if (op === 'fit') S.cam = fitCam();
     else {
-      const next = Math.min(2.2, Math.max(0.6, S.cam.s * (op === 'in' ? 1.2 : 1 / 1.2)));
+      const next = Math.min(2.2, Math.max(Math.min(0.3, fitCam().s / 2), S.cam.s * (op === 'in' ? 1.2 : 1 / 1.2)));
       const cx = canvas.clientWidth / 2;
       const cy = canvas.clientHeight / 2;
       S.cam.x = cx - (cx - S.cam.x) * (next / S.cam.s);
@@ -1361,10 +1376,14 @@ view.addEventListener('click', async (event) => {
       await api('POST', `/api/desktop-sessions/${encodeURIComponent(el.dataset.thread)}/takeover-probe`, { confirm: true });
       await renderPage({ quiet: true });
     } else if (action === 'new-role') {
-      if (S.setup?.mode === 'personal') { await api('PATCH', '/api/setup', { step: 'employees' }); location.hash = '#/guide'; }
-      else view.querySelector('#role-dialog').showModal();
+      const dialog = view.querySelector(S.setup?.mode === 'personal' ? '#employee-dialog' : '#role-dialog');
+      dialog.showModal();
+      const form = dialog.querySelector('form');
+      form.dataset.draftDirty = 'true'; form.dataset.requestId ||= crypto.randomUUID();
+      rememberForm(form, { open: true });
     } else if (action === 'close-dialog') {
-      el.closest('dialog').close();
+      const dialog = el.closest('dialog');
+      rememberForm(dialog.querySelector('form'), { open: false }); dialog.close();
     } else if (action.startsWith('migration-')) {
       el.disabled = true;
       const op = action.slice('migration-'.length);
@@ -1465,6 +1484,7 @@ view.addEventListener('submit', async (event) => {
   const button = event.submitter || form.querySelector('button[type="submit"], button:not([type])');
   if (button) button.disabled = true;
   const done = (msg) => {
+    forgetDraft(form);
     if (!button) return;
     const original = button.innerHTML;
     button.innerHTML = msg;
@@ -1511,6 +1531,7 @@ view.addEventListener('submit', async (event) => {
     }
     if (kind === 'desktop-connection') {
       const result = await api('PUT', '/api/desktop-connection', { threadId: f.threadId.value.trim(), name: f.name.value.trim(), socketPath: f.socketPath.value.trim() });
+      forgetDraft(form);
       toast(result.ready ? '桌面聊天已连接' : '设置已保存，请核对连接提示', result.ready ? 'done' : 'waiting');
       await loadCore(); await renderPage();
     } else if (kind === 'desktop-manager') {
@@ -1518,6 +1539,7 @@ view.addEventListener('submit', async (event) => {
       S.managerRequestId ||= crypto.randomUUID();
       S.managerSubmitting = true;
       const message = await api('POST', '/api/desktop-manager/messages', { requestId: S.managerRequestId, text: S.managerDraft });
+      forgetDraft(form);
       S.managerDraft = ''; S.managerRequestId = null;
       f.text.value = '';
       if (message.status === 'unknown' || message.status === 'error') toast(DESKTOP_MESSAGE_LABEL[message.status][0], message.status === 'error' ? 'error' : 'waiting');
@@ -1527,6 +1549,7 @@ view.addEventListener('submit', async (event) => {
       const body = { sessionId: form.dataset.session, prompt: f.prompt.value.trim(), requestId: form.dataset.requestId ||= crypto.randomUUID() };
       form._submission = body;
       await api('POST', '/api/runs', body);
+      forgetDraft(form);
       f.prompt.value = '';
       delete form.dataset.requestId;
       await loadCore(); await renderPage({ quiet: true });
@@ -1541,6 +1564,7 @@ view.addEventListener('submit', async (event) => {
       if (f.sessionId.value === 'new') body.session = { title: f.title.value || undefined, cwd: f.cwd.value, model: f.model.value || undefined, sandbox: f.sandbox.value, approvalPolicy: f.approvalPolicy.value };
       else body.sessionId = f.sessionId.value;
       const run = await api('POST', '/api/runs', body);
+      forgetDraft(form);
       S.dispatchDraft = '';
       await loadCore();
       location.hash = `#/task/${run.id}`;
@@ -1550,6 +1574,7 @@ view.addEventListener('submit', async (event) => {
       done('已追加');
     } else if (kind === 'continue') {
       const run = await api('POST', `/api/sessions/${form.dataset.session}/continue`, { prompt: f.prompt.value.trim() || undefined });
+      forgetDraft(form);
       await loadCore();
       location.hash = `#/task/${run.id}`;
     } else if (kind === 'role-skills') {
@@ -1564,19 +1589,35 @@ view.addEventListener('submit', async (event) => {
       done('已保存');
     } else if (kind === 'role-appearance') {
       await api('PATCH', `/api/roles/${encodeURIComponent(form.dataset.role)}/config`, { palette: f.palette.value, emblem: f.emblem.value });
+      forgetDraft(form);
       await loadCore();
       renderSidebar();
       await renderPage({ quiet: true });
+    } else if (kind === 'role-profile') {
+      await api('PATCH', `/api/roles/${encodeURIComponent(form.dataset.role)}/config`, { profile: { name: f.name.value.trim(), title: f.title.value.trim(), instructions: f.instructions.value.trim() } });
+      forgetDraft(form); await loadCore(); renderSidebar(); updatePageTitle(); done('职责已保存');
+      toast('职责已保存，下次执行时生效', 'done');
+    } else if (kind === 'new-employee') {
+      form.dataset.requestId ||= crypto.randomUUID(); rememberForm(form);
+      const result = await api('POST', '/api/team/employees', { requestId: form.dataset.requestId, name: f.name.value.trim(), title: f.title.value.trim(), description: f.description.value.trim(), palette: f.palette.value, emblem: f.emblem.value });
+      forgetDraft(form); form.closest('dialog').close();
+      S.workspaces = null; await loadCore(); renderSidebar(); await renderPage({ quiet: true });
+      const added = view.querySelector(`[data-role-key="${CSS.escape(result.role.key)}"]`);
+      added?.setAttribute('tabindex', '-1'); added?.focus({ preventScroll: true }); added?.scrollIntoView({ block: 'nearest', behavior: reduceMotion() ? 'instant' : 'smooth' });
+      toast('员工已加入团队，固定会话已建立', 'done');
     } else if (kind === 'new-role') {
       const collaboration = f.authority.value === 'none' ? undefined : { namespace: f.namespace.value.trim(), authority: f.authority.value };
       const role = await api('POST', '/api/roles', { name: f.name.value, title: f.title.value, description: f.description.value, instructions: f.instructions.value, palette: f.palette.value, emblem: f.emblem.value, collaboration });
       if (collaboration) await api('POST', '/api/sessions', { roleKey: role.key, title: `${role.roleTitle} · ${role.name}` });
       S.workspaces = null;
+      forgetDraft(form);
       form.closest('dialog').close();
       await loadCore();
-      location.hash = `#/role/${encodeURIComponent(role.key)}`;
+      renderSidebar(); await renderPage({ quiet: true });
     }
   } catch (error) {
+    const fieldError = form.querySelector('[data-form-error]');
+    if (fieldError) { fieldError.textContent = error.message; fieldError.classList.remove('hidden'); }
     toast(error.message, 'error');
   } finally {
     if (kind === 'desktop-manager') { S.managerSubmitting = false; scheduleManagerReload(); }

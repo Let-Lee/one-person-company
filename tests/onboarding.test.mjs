@@ -20,6 +20,7 @@ class Runtime extends EventEmitter {
     return { thread: { id, status: { type: 'idle' } }, cwd: params.cwd };
   }
   async setThreadName() {}
+  async resumeThread(id, params) { this.resumed = { id, params }; return { thread: { id } }; }
   isLoaded(id) { return this.threads.has(id); }
   async listSkills(cwds) { return { data: [{ cwd: cwds[0], skills: [{ name: 'fixture-skill', path: '/fixture/skill/SKILL.md', enabled: true, description: '只用于协议测试' }] }] }; }
   async startTurn(params) { this.startedTurns.push(params); return { turn: { id: 'fixture-turn-' + this.startedTurns.length } }; }
@@ -78,6 +79,42 @@ test('the guide creates only chosen roles, retries do not duplicate employees, a
   const restored = createWorkbench({ env: f.env, runtime: new Runtime() });
   assert.equal(restored.workbench.onboarding.snapshot().roleCount, 2); assert.equal(restored.workbench.onboarding.snapshot().manager.sessionCreated, true);
   assert.equal(restored.workbench.company.enabled, false); assert.equal(f.runtime.startedTurns.length, 0);
+});
+
+test('daily hiring stays outside onboarding and retries a failed session without duplicating the employee', async (t) => {
+  const f = fixture(t); await f.guide.checkEnvironment(); await f.guide.createManager(managerBody);
+  await f.guide.createEmployee(employeeBody); f.guide.finish();
+  const before = { step: f.guide.setup.step, manager: f.guide.setup.managerRoleKey, sessions: Object.keys(f.store.state.sessions) };
+  const body = { ...employeeBody, requestId: 'daily-hire-001', name: '内容员工', title: '内容策划' };
+  f.runtime.failCreate = true;
+  await assert.rejects(f.guide.addEmployee(body), /会话建立失败/);
+  assert.equal(f.guide.snapshot().roleCount, 3);
+  f.runtime.failCreate = false;
+  const added = await f.guide.addEmployee(body), repeated = await f.guide.addEmployee(body);
+  assert.equal(added.role.key, repeated.role.key);
+  assert.equal(added.sessionCreated, true);
+  assert.equal(f.guide.snapshot().roleCount, 3);
+  assert.equal(Object.keys(f.store.state.sessions).length, 3);
+  assert.equal(f.guide.setup.step, before.step);
+  assert.equal(f.guide.setup.completed, true);
+  assert.equal(f.guide.setup.managerRoleKey, before.manager);
+  assert.equal(added.role.collaboration.namespace, f.guide.setup.namespace);
+  assert.equal(added.role.collaboration.authority, 'employee');
+  assert.equal(f.runtime.startedTurns.length, 0);
+});
+
+test('responsibility edits retain the stable thread and reach its next execution through resume overrides', async (t) => {
+  const f = fixture(t); await f.guide.checkEnvironment(); await f.guide.createManager(managerBody);
+  const key = f.guide.setup.managerRoleKey, session = f.workbench.collaboration.sessionFor(key), original = session.threadId;
+  const next = '新版职责：先检查实际文件，按范围派单后核验交付。';
+  await f.workbench.configureRole(key, { profile: { name: managerBody.name, title: '总经理', instructions: next } });
+  assert.equal(f.runtime.startedTurns.length, 0);
+  await f.workbench.dispatch({ sessionId: session.id, prompt: '协议替身检查', requestId: 'profile-check-001' });
+  for (let i = 0; i < 50 && !f.runtime.resumed; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.equal(f.runtime.resumed.id, original);
+  assert.ok(f.runtime.resumed.params.developerInstructions.includes(next));
+  assert.equal(f.workbench.collaboration.sessionFor(key).threadId, original);
+  assert.equal(f.runtime.created.length, 1);
 });
 
 test('onboarding advances only after actual prerequisites, and an employee session failure survives refresh without duplicate roles', async (t) => {

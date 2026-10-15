@@ -142,6 +142,7 @@ export function createServer({ workbench, paths, port, desktopManager, nativeCol
   route('POST', /^\/api\/setup\/manager$/, (_m, body) => workbench.onboarding.createManager(body));
   route('POST', /^\/api\/setup\/manager\/bind$/, (_m, body) => workbench.onboarding.bindManager(body));
   route('POST', /^\/api\/setup\/employees$/, (_m, body) => workbench.onboarding.createEmployee(body));
+  route('POST', /^\/api\/team\/employees$/, (_m, body) => workbench.onboarding.addEmployee(body));
   route('POST', /^\/api\/setup\/skills$/, (_m, body) => workbench.onboarding.saveSkills(body));
   route('POST', /^\/api\/setup\/first-task$/, (_m, body) => workbench.onboarding.firstTask(body));
   route('POST', /^\/api\/setup\/finish$/, () => workbench.onboarding.finish());
