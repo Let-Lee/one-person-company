@@ -1,6 +1,8 @@
 ﻿param([string]$EvidencePath = (Join-Path $env:TEMP 'windows-company-validation.json'))
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+$OutputEncoding = [Console]::OutputEncoding
 $companyRepo = Split-Path $PSScriptRoot -Parent
 $companyTemp = Join-Path $env:TEMP ('company-verify-' + [guid]::NewGuid().ToString('N'))
 $companyInstall = Join-Path $companyTemp '示例 company'
@@ -8,6 +10,7 @@ $companyEvidence = @{ platform = [Environment]::OSVersion.VersionString; powersh
 try {
   New-Item -ItemType Directory -Path $companyTemp | Out-Null
   $env:CODEX_HOME = Join-Path $companyTemp 'empty-codex'
+  New-Item -ItemType Directory -Path $env:CODEX_HOME | Out-Null
   $env:ONE_PERSON_COMPANY_NO_OPEN = '1'
   $env:CODEX_BIN = Get-Command codex.cmd -ErrorAction Stop | Select-Object -First 1 -ExpandProperty Source
   $companyEvidence.codex = (& node (Join-Path $companyRepo 'scripts/manage.mjs') doctor --json | ConvertFrom-Json)
@@ -16,7 +19,7 @@ try {
   New-Item -ItemType Directory -Path $companyStage | Out-Null
   Push-Location $companyRepo
   try {
-    foreach ($file in (& git ls-files)) {
+    foreach ($file in (& git -c core.quotePath=false ls-files)) {
       $target = Join-Path $companyStage $file
       New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
       Copy-Item -LiteralPath (Join-Path $companyRepo $file) -Destination $target
