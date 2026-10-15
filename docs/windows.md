@@ -37,7 +37,7 @@ Windows 原生运行和 WSL 使用各自的程序与路径。本入口面向原�
 
 Windows CI 在真实 Windows 执行环境检查：隔离回归、PowerShell 5.1/7 安装、中文和空格目录、首次零岗位引导、页面与服务接口、重复安装保留设置及端口、Codex CLI 发现、真实 App Server 初始化、启动器停止。不登录账号、不复制凭据、不发送模型任务。
 
-已在 Windows Server 2025、Node.js 24.21.0、Codex CLI 0.162.1 的真实 Windows 执行环境通过上述检查，PowerShell 5.1 与 7 分别运行。初次通过记录见 [实际 Windows 运行](https://github.com/Let-Lee/one-person-company/actions/runs/38692524440)；后续提交结果见 [Windows 安装与运行检查](https://github.com/Let-Lee/one-person-company/actions/workflows/windows.yml)。修复前的失败记录保留，不当作通过结果。
+已在 Windows Server 2025、Node.js 24.21.0、Codex CLI 0.162.1 的真实 Windows 执行环境通过上述检查，PowerShell 5.1 与 7 分别运行。已补充从公开 GitHub 下载源码和实际 CMD 启动停止，记录见 [Windows 公开下载与启动验证](https://github.com/Let-Lee/one-person-company/actions/runs/38695169514)；初次通过见 [实际 Windows 运行](https://github.com/Let-Lee/one-person-company/actions/runs/38692524440)。后续提交结果见 [Windows 安装与运行检查](https://github.com/Let-Lee/one-person-company/actions/workflows/windows.yml)。修复前的失败记录保留，不当作通过结果。
 
 **仍未验证：Windows Codex 桌面应用中的真实聊天双向消息、桌面升级后的协议兼容，以及各用户账号的工具能力。** CI 的管道协议替身与 Mac 实测不能替代这项验证。只有真实连接到当前目标聊天的持有端，界面才会显示连接成功。
 
