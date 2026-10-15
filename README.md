@@ -47,14 +47,7 @@
 3. 保存并检查，看到“桌面聊天已连接”后点击“使用桌面模式”。
 4. 在“交代任务”中输入目标，消息进入这个原聊天，进度和回复返回当前页面。
 
-```mermaid
-flowchart LR
-    A["1 控制台<br/>输入目标"] --- B["2 保存的聊天 ID<br/>找到本机持有端"]
-    B --- C["3 原 Codex 聊天<br/>沿用原工具与设置"]
-    C --- D["4 订阅同一会话<br/>进度与回复回到控制台"]
-    classDef local fill:#eeedff,stroke:#7d71d6,color:#292449;
-    class A,B,D local;
-```
+![桌面接入调用线路：输入、目标聊天、原会话执行、进度回传](docs/images/desktop-flow.svg)
 
 不会因为连接成功就把其他桌面员工导入控制台，也不会自动赋予该聊天经理身份。消息始终发往你保存的目标；提交结果不明确时会保留记录，不自动重复发送。连接检查不会发送模型任务。[桌面连接详情](docs/desktop-connection.md)
 
@@ -62,18 +55,7 @@ flowchart LR
 
 以下是 **独立 AI 团队** 的完整流程。经理和内容策划使用不同的 Codex 会话；员工回报后，经理回到自己的原会话处理。
 
-```mermaid
-flowchart LR
-    A["1 你交代目标<br/>经理固定会话"] --- B["2 经理派单<br/>员工固定会话"]
-    B --- C["3 员工执行<br/>文件与运行记录"]
-    C --- D["4 关键回报<br/>经理收件箱"]
-    D --- E["5 经理核验<br/>验收或要求修正"]
-    E --- F["6 结果回到页面<br/>对话与协作记录"]
-    classDef work fill:#eeedff,stroke:#7d71d6,color:#292449;
-    classDef result fill:#e8f5ef,stroke:#6b9b88,color:#244838;
-    class A,B,C,D work;
-    class E,F result;
-```
+![独立团队调用线路：经理派单、员工执行、关键回报、实际验收](docs/images/team-flow.svg)
 
 ### 1. 交代目标，经理发出真实派单
 
